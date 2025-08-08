@@ -246,6 +246,109 @@ graph TB
 #### 核心資料結構定義
 
 ```python
+from enum import Enum
+from dataclasses import dataclass, field
+from typing import List, Optional
+from typing_extensions import TypedDict, Annotated
+from langgraph.graph import add_messages
+
+class ProcessingStatus(Enum):
+    """處理狀態枚舉"""
+    PENDING = "pending"             # 等待處理
+    PROCESSING = "processing"       # 處理中
+    COMPLETED = "completed"         # 已完成
+    FAILED = "failed"              # 處理失敗
+    RETRY_NEEDED = "retry_needed"   # 需要重試
+    SKIPPED = "skipped"            # 已跳過
+
+class ComplexityLevel(Enum):
+    """複雜度級別枚舉"""
+    SIMPLE = "simple"
+    MEDIUM = "medium"
+    COMPLEX = "complex"
+
+class ErrorType(Enum):
+    """錯誤類型枚舉"""
+    API_CONNECTION = "api_connection"
+    TRANSLATION_QUALITY = "translation_quality"
+    SYNTAX_ERROR = "syntax_error"
+    TIMEOUT = "timeout"
+    AUTHENTICATION = "authentication"
+    RATE_LIMIT = "rate_limit"
+    OTHER = "other"
+
+class Language(Enum):
+    """語言類型枚舉"""
+    ENGLISH = "en"
+    TRADITIONAL_CHINESE = "zh-tw"
+
+class ProcessingStage(Enum):
+    """處理階段枚舉"""
+    DATA_LOADING = "data_loading"
+    TRANSLATION = "translation"
+    QA_EXECUTION = "qa_execution"
+    EVALUATION = "evaluation"
+    QUALITY_CHECK = "quality_check"
+    OUTPUT_GENERATION = "output_generation"
+    COMPLETED = "completed"
+
+class CharacterEncoding(Enum):
+    """字符編碼枚舉"""
+    UTF8 = "utf-8"
+    UTF16 = "utf-16"
+    UTF32 = "utf-32"
+    ASCII = "ascii"
+    GBK = "gbk"
+    BIG5 = "big5"
+
+@dataclass
+class RecordMetadata:
+    """資料記錄元資料結構"""
+    original_length: int           # 原始文本長度
+    code_block_count: int         # 程式碼區塊數量
+    complexity_level: ComplexityLevel # 複雜度級別
+    language_hints: List[str]     # 涉及的程式語言
+    topic_tags: List[str]         # 主題標籤
+    estimated_difficulty: int     # 估計難度 1-10
+    has_mathematical_content: bool # 是否包含數學內容
+    character_encoding: CharacterEncoding # 字符編碼
+    created_timestamp: float      # 創建時間戳
+
+@dataclass
+class ErrorRecord:
+    """錯誤記錄結構"""
+    error_type: ErrorType          # 錯誤類型
+    error_message: str           # 錯誤訊息
+    timestamp: float             # 發生時間戳
+    retry_attempt: int           # 重試次數
+    agent_name: str              # 發生錯誤的 Agent
+    recovery_action: str         # 恢復措施
+
+@dataclass
+class ProcessingMetadata:
+    """處理過程元資料結構"""
+    total_processing_time: float    # 總處理時間（秒）
+    translation_time: float         # 翻譯時間（秒）
+    qa_execution_time: float        # QA執行時間（秒）
+    evaluation_time: float          # 評估時間（秒）
+    retry_count: int                # 重試次數
+    models_used: List[str]          # 使用的模型列表
+    api_calls_count: int            # API 呼叫次數
+    tokens_consumed: int            # 消耗的 token 數
+    processing_stage: ProcessingStage # 處理階段
+    cost_estimation_usd: float      # 成本估算（美元）
+
+@dataclass
+class SourceInfo:
+    """來源資料集資訊結構"""
+    dataset_name: str              # 資料集名稱
+    dataset_version: str           # 資料集版本
+    original_index: str            # 在原始資料集中的索引
+    subset_name: str               # 子集名稱（如 'train', 'test'）
+    download_url: str              # 下載來源 URL
+    license_info: str              # 授權資訊
+    collection_date: str           # 收集日期
+
 @dataclass
 class OriginalRecord:
     """原始資料記錄結構"""
@@ -253,7 +356,7 @@ class OriginalRecord:
     instruction: str        # 原始英文問題
     output: str            # 原始英文答案  
     source_dataset: str    # 來源資料集名稱
-    metadata: Dict[str, Any]
+    metadata: RecordMetadata
 
 @dataclass
 class TranslationResult:
@@ -268,7 +371,7 @@ class QAExecutionResult:
     """QA 執行結果"""
     question: str                  # 輸入問題
     answer: str                    # LLM 生成答案
-    language: str                  # 問題語言 (en/zh-tw)
+    language: Language             # 問題語言
     reasoning_steps: List[str]     # 推理步驟
     execution_time: float          # 執行時間
     model_used: str                # 使用的模型
@@ -292,8 +395,8 @@ class ProcessingState:
     translated_qa_result: Optional[QAExecutionResult]
     quality_assessment: Optional[QualityAssessment]
     retry_count: int = 0
-    processing_status: str = "pending"  # pending/processing/completed/failed/retry_needed
-    error_history: List[Dict[str, Any]] = field(default_factory=list)
+    processing_status: ProcessingStatus = ProcessingStatus.PENDING
+    error_history: List[ErrorRecord] = field(default_factory=list)
     improvement_suggestions: List[str] = field(default_factory=list)
     
 @dataclass
@@ -305,9 +408,29 @@ class FinalRecord:
     translated_instruction: str
     translated_output: str
     quality_metadata: QualityAssessment
-    processing_metadata: Dict[str, Any]  # 包含處理時間、重試次數、使用的模型等
-    source_info: Dict[str, str]         # 來源資料集資訊
+    processing_metadata: ProcessingMetadata  # 包含處理時間、重試次數、使用的模型等
+    source_info: SourceInfo         # 來源資料集資訊
     validation_notes: List[str] = field(default_factory=list)  # 驗證備註
+
+@dataclass
+class CostEstimation:
+    """成本估算結構"""
+    openai_cost_usd: float         # OpenAI 成本
+    anthropic_cost_usd: float      # Anthropic 成本
+    google_cost_usd: float         # Google 成本
+    ollama_cost_usd: float         # Ollama 成本（通常為0）
+    total_cost_usd: float          # 總成本
+    
+@dataclass
+class ErrorSummary:
+    """錯誤統計結構"""
+    api_connection_errors: int     # API 連接錯誤次數
+    translation_quality_issues: int # 翻譯品質問題次數
+    syntax_errors: int             # 語法錯誤次數
+    timeout_errors: int            # 超時錯誤次數
+    authentication_errors: int     # 認證錯誤次數
+    rate_limit_errors: int         # 速率限制錯誤次數
+    other_errors: int              # 其他錯誤次數
 
 @dataclass  
 class BatchProcessingResult:
@@ -317,8 +440,8 @@ class BatchProcessingResult:
     failed_records: int
     average_quality_score: float
     processing_time_seconds: float
-    cost_estimation: Dict[str, float]  # 各 Provider 的成本估算
-    error_summary: Dict[str, int]      # 錯誤類型統計
+    cost_estimation: CostEstimation  # 各 Provider 的成本估算
+    error_summary: ErrorSummary      # 錯誤類型統計
 ```
 
 ## 系統架構圖 / System Architecture Diagram
@@ -547,16 +670,15 @@ project-root/
     │   ├── quality.py          # 品質標準常數
     │   └── llm.py              # LLM 服務常數
     │
-    ├── types/
+    ├── models/
     │   ├── __init__.py
     │   ├── dataset.py          # 資料集類型定義
-    │   ├── agents.py           # Agent 類型定義
     │   ├── quality.py          # 品質評估類型
     │   └── workflow.py         # 工作流狀態類型
     │
     ├── workflow/
     │   ├── __init__.py
-    │   ├── state.py            # LangGraph 狀態管理
+    │   ├── state.py            # LangGraph 狀態管理 (與狀態定義)
     │   ├── graph.py            # LangGraph 工作流定義
     │   ├── nodes/              # 工作流節點模組
     │   │   ├── __init__.py
@@ -689,11 +811,200 @@ RetryPolicy = {
 - 每個 Agent 可配置不同的模型
 - **Provider 配置**: 透過配置檔指定各 Agent 使用的 LLM 模型
 
-這個系統設計採用 Multi-Agent 架構，確保每個 Agent 都有明確的職責分工，通過 LangGraph 協調各 Agent 的工作流程。**核心設計理念是讓 LLM Agent 承擔主要的分析、翻譯和評估工作**，避免依賴硬編碼的規則和工具，充分發揮大語言模型在繁體中文理解和程式碼分析方面的優勢，實現高品質的繁體中文程式碼問答資料集轉換。
+### 4. Node 節點實作規範
 
-**關鍵設計特色：**
-- **Agent 驅動**: 所有核心邏輯由 LLM Agent 透過自然語言理解完成
-- **最小依賴**: 避免硬編碼的程式碼解析、術語管理等工具
-- **彈性配置**: 每個 Agent 可配置不同的 LLM 模型
-- **智慧評估**: 品質控制完全基於 LLM 的語義理解
-- **本地支援**: 透過 Ollama 支援完全離線的本地部署
+#### 工作流狀態管理
+- **使用 TypedDict 定義狀態**: 所有工作流狀態必須在 `state.py` 中使用 TypedDict 定義
+- **統一狀態介面**: 所有 Node 節點必須遵循 `state -> state` 的函數簽名
+- **彈性狀態更新**: Node 節點可以使用 `state.update({})` 批次更新或直接修改狀態屬性，兩種方式都是允許的
+
+#### Node 節點設計原則
+```python
+# 範例：正確的 Node 節點實作方式
+
+from typing_extensions import TypedDict
+from langgraph.graph import add_messages
+
+# 在 state.py 中定義工作流狀態
+class WorkflowState(TypedDict):
+    """工作流狀態定義"""
+    current_record: OriginalRecord
+    translation_result: Optional[TranslationResult]
+    original_qa_result: Optional[QAExecutionResult]
+    translated_qa_result: Optional[QAExecutionResult]
+    quality_assessment: Optional[QualityAssessment]
+    retry_count: int
+    processing_status: ProcessingStatus
+    error_history: Annotated[List[ErrorRecord], add_messages]
+    improvement_suggestions: List[str]
+
+# Node 節點實作範例
+def analyzer_designer_node(state: WorkflowState) -> WorkflowState:
+    """分析設計者節點 - 負責翻譯任務"""
+    
+    # 處理邏輯...
+    translation_result = perform_translation(state["current_record"])
+    
+    # 可以使用 state.update() 批次更新
+    state.update({
+        "translation_result": translation_result,
+        "processing_status": ProcessingStatus.PROCESSING
+    })
+    
+    return state
+
+def reproducer_node(state: WorkflowState) -> WorkflowState:
+    """再現者節點 - 負責 QA 執行"""
+    
+    # 處理邏輯...
+    original_qa = execute_qa(state["current_record"])
+    translated_qa = execute_qa_translated(state["translation_result"])
+    
+    # 也可以直接修改狀態屬性
+    state["original_qa_result"] = original_qa
+    state["translated_qa_result"] = translated_qa
+    state["processing_status"] = ProcessingStatus.PROCESSING
+    
+    return state
+```
+
+#### 強制性實作要求
+
+1. **類型安全**: 所有 Node 函數必須有明確的類型標註
+2. **完整狀態返回**: 必須返回完整的 TypedDict 狀態物件
+3. **直接狀態修改**: 可以直接修改狀態物件的屬性，LangGraph 會處理狀態追蹤
+4. **錯誤處理**: 每個 Node 必須妥善處理異常並更新錯誤狀態
+5. **日誌記錄**: 每個 Node 的關鍵操作必須記錄日誌
+
+#### 禁止的實作方式
+```python
+# ❌ 錯誤：沒有類型標註
+def bad_node(state):  # 缺少類型標註
+    state["result"] = "something"
+    return state
+
+# ❌ 錯誤：沒有返回狀態
+def bad_node2(state: WorkflowState):  # 沒有返回狀態
+    state["processing_status"] = ProcessingStatus.COMPLETED
+    # 缺少 return state
+
+# ❌ 錯誤：返回部分狀態
+def bad_node3(state: WorkflowState) -> dict:  # 錯誤的返回類型
+    return {
+        "translation_result": result,
+        "processing_status": ProcessingStatus.COMPLETED,
+    }  # 缺少其他必要欄位
+```
+
+#### 正確的實作方式
+```python
+# ✅ 正確：使用 state.update() 批次更新
+def good_node_update(state: WorkflowState) -> WorkflowState:
+    """使用 state.update() 的範例"""
+    try:
+        # 執行節點邏輯
+        result = process_data(state["current_record"])
+        
+        # 使用 state.update() 批次更新狀態
+        state.update({
+            "translation_result": result,
+            "processing_status": ProcessingStatus.COMPLETED
+        })
+        
+        return state
+        
+    except Exception as e:
+        # 錯誤處理
+        error_record = ErrorRecord(
+            error_type=ErrorType.OTHER,
+            error_message=str(e),
+            timestamp=time.time(),
+            retry_attempt=state.get("retry_count", 0),
+            agent_name="analyzer_designer",
+            recovery_action="logged_error"
+        )
+        
+        # 使用 state.update() 更新錯誤狀態
+        state.update({
+            "processing_status": ProcessingStatus.FAILED,
+            "error_history": state["error_history"] + [error_record]
+        })
+        
+        return state
+
+# ✅ 正確：直接修改狀態屬性
+def good_node_direct(state: WorkflowState) -> WorkflowState:
+    """直接修改狀態的範例"""
+    try:
+        # 執行節點邏輯
+        result = process_data(state["current_record"])
+        
+        # 直接修改狀態屬性（同樣是正確的）
+        state["translation_result"] = result
+        state["processing_status"] = ProcessingStatus.COMPLETED
+        
+        return state
+        
+    except Exception as e:
+        # 直接修改狀態處理錯誤
+        state["processing_status"] = ProcessingStatus.FAILED
+        state["error_history"].append(
+            ErrorRecord(
+                error_type=ErrorType.OTHER,
+                error_message=str(e),
+                timestamp=time.time(),
+                retry_attempt=state.get("retry_count", 0),
+                agent_name="analyzer_designer",
+                recovery_action="logged_error"
+            )
+        )
+        
+        return state
+
+# ✅ 正確：複雜狀態更新範例
+def evaluator_node(state: WorkflowState) -> WorkflowState:
+    """評估者節點 - 展示複雜狀態更新"""
+    
+    quality_result = evaluate_translation_quality(
+        state["original_qa_result"], 
+        state["translated_qa_result"]
+    )
+    
+    # 根據評估結果決定下一步
+    if quality_result.overall_quality >= 7.0:
+        # 品質達標 - 可選擇使用 update 或直接修改
+        state.update({
+            "quality_assessment": quality_result,
+            "processing_status": ProcessingStatus.COMPLETED,
+            "improvement_suggestions": []
+        })
+    else:
+        # 品質不達標 - 需要重試（使用直接修改）
+        retry_count = state.get("retry_count", 0) + 1
+        
+        if retry_count <= 3:
+            # 直接修改狀態
+            state["quality_assessment"] = quality_result
+            state["processing_status"] = ProcessingStatus.RETRY_NEEDED
+            state["retry_count"] = retry_count
+            state["improvement_suggestions"] = quality_result.improvement_suggestions
+        else:
+            # 超過重試次數，標記為失敗
+            state["quality_assessment"] = quality_result
+            state["processing_status"] = ProcessingStatus.FAILED
+            state["retry_count"] = retry_count
+    
+    return state
+```
+
+#### 狀態管理最佳實踐
+
+1. **狀態分片**: 大型狀態應該分解為邏輯相關的小片段
+2. **預設值處理**: 使用 `state.get(key, default)` 安全存取狀態
+3. **狀態驗證**: 在關鍵節點驗證狀態的完整性和正確性
+4. **追蹤機制**: 重要狀態變更必須記錄到 `error_history` 或專用的追蹤欄位
+
+這種設計確保：
+- **類型安全**: TypedDict 提供編譯時類型檢查
+- **可追蹤性**: 所有狀態變更都可以被 LangGraph 追蹤和調試
+- **模組化**: 每個 Node 只關注自己的職責和狀態更新

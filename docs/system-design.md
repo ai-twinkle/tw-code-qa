@@ -673,8 +673,7 @@ project-root/
     ├── models/
     │   ├── __init__.py
     │   ├── dataset.py          # 資料集類型定義
-    │   ├── quality.py          # 品質評估類型
-    │   └── workflow.py         # 工作流狀態類型
+    │   └── quality.py          # 品質評估類型
     │
     ├── workflow/
     │   ├── __init__.py

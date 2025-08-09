@@ -1,0 +1,286 @@
+{
+  "version": "1.0.0",
+  "last_updated": "2025-08-09",
+  "description": "Agent 模型配置檔案，定義各個 Agent 使用的 LLM 模型和參數",
+  
+  "agents": {
+    "analyzer_designer": {
+      "description": "分析設計者 Agent，負責語義分析與序列式翻譯執行",
+      "primary_model": "gpt-4o",
+      "fallback_models": ["gpt-4.1", "gemini-2.5-flash"],
+      "model_parameters": {
+        "temperature": 0.1,
+        "max_tokens": 4096,
+        "top_p": 0.95,
+        "frequency_penalty": 0.0,
+        "presence_penalty": 0.0
+      },
+      "retry_policy": {
+        "max_retries": 3,
+        "retry_on_quality_failure": true,
+        "quality_threshold": 7.0
+      },
+      "prompt_optimization": {
+        "use_few_shot_examples": true,
+        "context_window_management": true,
+        "terminology_consistency": true
+      }
+    },
+    
+    "reproducer": {
+      "description": "再現者 Agent，負責 QA 推理與語義比較",
+      "primary_model": "claude-4-sonnet",
+      "fallback_models": ["gpt-4o", "gemini-2.5-flash"],
+      "model_parameters": {
+        "temperature": 0.0,
+        "max_tokens": 2048,
+        "top_p": 0.95,
+        "frequency_penalty": 0.0,
+        "presence_penalty": 0.0
+      },
+      "retry_policy": {
+        "max_retries": 2,
+        "retry_on_quality_failure": false,
+        "quality_threshold": null
+      },
+      "prompt_optimization": {
+        "use_few_shot_examples": false,
+        "context_window_management": true,
+        "terminology_consistency": false
+      }
+    },
+    
+    "evaluator": {
+      "description": "評估者 Agent，負責語義一致性檢查與翻譯指導",
+      "primary_model": "gpt-4o",
+      "fallback_models": ["claude-4-sonnet", "gemini-2.5-flash"],
+      "model_parameters": {
+        "temperature": 0.1,
+        "max_tokens": 2048,
+        "top_p": 0.95,
+        "frequency_penalty": 0.0,
+        "presence_penalty": 0.0
+      },
+      "retry_policy": {
+        "max_retries": 2,
+        "retry_on_quality_failure": false,
+        "quality_threshold": null
+      },
+      "prompt_optimization": {
+        "use_few_shot_examples": true,
+        "context_window_management": true,
+        "terminology_consistency": true
+      }
+    }
+  },
+  
+  "model_definitions": {
+    "gpt-4o": {
+      "provider": "openai",
+      "model_id": "gpt-4o",
+      "context_window": 128000,
+      "cost_per_1k_input_tokens": 0.0025,
+      "cost_per_1k_output_tokens": 0.01,
+      "rate_limits": {
+        "requests_per_minute": 60,
+        "tokens_per_minute": 150000,
+        "concurrent_requests": 5
+      },
+      "capabilities": {
+        "supports_function_calling": true,
+        "supports_streaming": true,
+        "supports_vision": true,
+        "optimal_for": ["complex_reasoning", "code_generation", "translation"]
+      }
+    },
+    
+    "gpt-4.1": {
+      "provider": "openai",
+      "model_id": "gpt-4.1",
+      "context_window": 200000,
+      "cost_per_1k_input_tokens": 0.0030,
+      "cost_per_1k_output_tokens": 0.012,
+      "rate_limits": {
+        "requests_per_minute": 50,
+        "tokens_per_minute": 120000,
+        "concurrent_requests": 4
+      },
+      "capabilities": {
+        "supports_function_calling": true,
+        "supports_streaming": true,
+        "supports_vision": true,
+        "optimal_for": ["advanced_reasoning", "complex_translation", "code_analysis"]
+      }
+    },
+    
+    "claude-4-sonnet": {
+      "provider": "anthropic",
+      "model_id": "claude-4-sonnet",
+      "context_window": 200000,
+      "cost_per_1k_input_tokens": 0.003,
+      "cost_per_1k_output_tokens": 0.015,
+      "rate_limits": {
+        "requests_per_minute": 50,
+        "tokens_per_minute": 100000,
+        "concurrent_requests": 3
+      },
+      "capabilities": {
+        "supports_function_calling": true,
+        "supports_streaming": true,
+        "supports_vision": true,
+        "optimal_for": ["qa_execution", "semantic_analysis", "evaluation"]
+      }
+    },
+    
+    "gemini-2.5-flash": {
+      "provider": "google",
+      "model_id": "gemini-2.5-flash",
+      "context_window": 1000000,
+      "cost_per_1k_input_tokens": 0.000125,
+      "cost_per_1k_output_tokens": 0.000375,
+      "rate_limits": {
+        "requests_per_minute": 300,
+        "tokens_per_minute": 500000,
+        "concurrent_requests": 10
+      },
+      "capabilities": {
+        "supports_function_calling": true,
+        "supports_streaming": true,
+        "supports_vision": true,
+        "optimal_for": ["fast_processing", "batch_operations", "cost_effective"]
+      }
+    },
+    
+    "ollama/llama3.1:8b": {
+      "provider": "ollama",
+      "model_id": "llama3.1:8b",
+      "context_window": 128000,
+      "cost_per_1k_input_tokens": 0.0,
+      "cost_per_1k_output_tokens": 0.0,
+      "rate_limits": {
+        "requests_per_minute": 100,
+        "tokens_per_minute": 100000,
+        "concurrent_requests": 4
+      },
+      "capabilities": {
+        "supports_function_calling": false,
+        "supports_streaming": true,
+        "supports_vision": false,
+        "optimal_for": ["local_processing", "offline_tasks", "cost_free"]
+      }
+    },
+    
+    "ollama/qwen2.5:7b": {
+      "provider": "ollama", 
+      "model_id": "qwen2.5:7b",
+      "context_window": 32000,
+      "cost_per_1k_input_tokens": 0.0,
+      "cost_per_1k_output_tokens": 0.0,
+      "rate_limits": {
+        "requests_per_minute": 100,
+        "tokens_per_minute": 80000,
+        "concurrent_requests": 4
+      },
+      "capabilities": {
+        "supports_function_calling": false,
+        "supports_streaming": true,
+        "supports_vision": false,
+        "optimal_for": ["local_evaluation", "chinese_processing", "cost_free"]
+      }
+    },
+    
+    "ollama/deepseek-coder:6.7b": {
+      "provider": "ollama",
+      "model_id": "deepseek-coder:6.7b", 
+      "context_window": 16000,
+      "cost_per_1k_input_tokens": 0.0,
+      "cost_per_1k_output_tokens": 0.0,
+      "rate_limits": {
+        "requests_per_minute": 100,
+        "tokens_per_minute": 60000,
+        "concurrent_requests": 4
+      },
+      "capabilities": {
+        "supports_function_calling": false,
+        "supports_streaming": true,
+        "supports_vision": false,
+        "optimal_for": ["code_analysis", "local_processing", "cost_free"]
+      }
+    }
+  },
+  
+  "quality_standards": {
+    "semantic_consistency": {
+      "minimum_score": 7.0,
+      "evaluation_criteria": [
+        "technical_accuracy",
+        "code_correctness", 
+        "terminology_consistency",
+        "language_fluency",
+        "completeness"
+      ]
+    },
+    "translation_quality": {
+      "terminology_database": "taiwanese_programming_terms",
+      "consistency_check": true,
+      "cultural_adaptation": true
+    },
+    "performance_metrics": {
+      "response_time_threshold_seconds": 120,
+      "success_rate_threshold": 0.95,
+      "cost_efficiency_target": 0.10
+    }
+  },
+  
+  "fallback_strategies": {
+    "model_failure": {
+      "strategy": "switch_to_fallback",
+      "max_fallback_attempts": 2,
+      "cooldown_seconds": 60
+    },
+    "rate_limit_exceeded": {
+      "strategy": "exponential_backoff",
+      "initial_delay_seconds": 1,
+      "max_delay_seconds": 300,
+      "backoff_multiplier": 2.0
+    },
+    "quality_failure": {
+      "strategy": "retry_with_enhanced_prompt",
+      "max_quality_retries": 3,
+      "prompt_enhancement_strategies": [
+        "add_examples",
+        "clarify_requirements",
+        "adjust_temperature"
+      ]
+    }
+  },
+  
+  "monitoring": {
+    "cost_tracking": {
+      "enabled": true,
+      "daily_budget_usd": 100.0,
+      "weekly_budget_usd": 500.0,
+      "monthly_budget_usd": 2000.0,
+      "alert_thresholds": [0.7, 0.9, 1.0]
+    },
+    "performance_tracking": {
+      "enabled": true,
+      "metrics": [
+        "response_time",
+        "success_rate",
+        "quality_scores",
+        "token_usage",
+        "cost_per_task"
+      ],
+      "reporting_interval_hours": 24
+    },
+    "health_checks": {
+      "enabled": true,
+      "check_interval_minutes": 15,
+      "endpoints_to_monitor": [
+        "openai_api",
+        "anthropic_api"
+      ]
+    }
+  }
+}

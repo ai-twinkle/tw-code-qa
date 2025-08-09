@@ -5,10 +5,34 @@ Dataset Related Models
 定義系統中處理資料集相關的所有資料結構
 """
 
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Union
-from enum import Enum
 import time
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import List, Optional, TypedDict
+
+
+# 明確定義元數據結構
+class RecordMetadata(TypedDict, total=False):
+    """記錄元數據結構"""
+    source_file: str
+    line_number: int
+    difficulty_score: float
+    category: str
+    has_code: bool
+    language_detected: str
+    token_count: int
+
+
+# 明確定義處理配置結構
+class ProcessingConfig(TypedDict, total=False):
+    """處理配置結構"""
+    max_retries: int
+    timeout_seconds: int
+    enable_caching: bool
+    batch_size: int
+    parallel_workers: int
+    output_format: str
+    quality_threshold: float
 
 
 class ProcessingStatus(Enum):
@@ -60,7 +84,7 @@ class OriginalRecord:
     question: str
     answer: str
     source_dataset: str
-    metadata: Dict[str, Union[str, int, float, bool]] = field(default_factory=dict)
+    metadata: RecordMetadata = field(default_factory=dict)
     complexity_level: Optional[ComplexityLevel] = None
     
     def __post_init__(self) -> None:
@@ -122,18 +146,23 @@ class DatasetMetadata:
     source_language: Language
     target_language: Language
     creation_timestamp: float = field(default_factory=time.time)
-    processing_config: Dict[str, Union[str, int, float, bool]] = field(default_factory=dict)
+    processing_config: ProcessingConfig = field(default_factory=dict)
 
 
 __all__ = [
+    # 明確類型定義
+    "RecordMetadata",
+    "ProcessingConfig",
+    # 枚舉類型
     "ProcessingStatus",
-    "ComplexityLevel", 
+    "ComplexityLevel",
     "Language",
     "ProcessingStage",
     "CharacterEncoding",
+    # 資料類別
     "OriginalRecord",
     "TranslationResult",
-    "QAExecutionResult", 
+    "QAExecutionResult",
     "ProcessedRecord",
-    "DatasetMetadata",
+    "DatasetMetadata"
 ]

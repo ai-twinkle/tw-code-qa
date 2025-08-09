@@ -10,6 +10,9 @@ from .quality import *
 from .workflow import *
 
 __all__ = [
+    # 資料集相關明確類型
+    "RecordMetadata",
+    "ProcessingConfig",
     # 資料集相關模型
     "OriginalRecord",
     "TranslationResult", 
@@ -24,9 +27,16 @@ __all__ = [
     "BatchQualityReport",
     
     # 工作流模型
+    "PerformanceMetrics",
+    "RetryPolicy",
+    "MonitoringConfig", 
     "WorkflowState",
-    "ProcessingMetrics",
-    "AgentOutput",
+    "BatchWorkflowState",
+    "NodeExecutionContext", 
+    "NodeExecutionResult",
+    "GraphConfiguration",
+    "StateUpdateValue",
+    "WORKFLOW_STATE_TRANSITIONS",
     
     # 枚舉類型
     "ProcessingStatus",

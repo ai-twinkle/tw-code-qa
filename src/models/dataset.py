@@ -13,14 +13,24 @@ from typing import List, Optional, TypedDict
 
 # 明確定義元數據結構
 class RecordMetadata(TypedDict, total=False):
-    """記錄元數據結構"""
-    source_file: str
-    line_number: int
-    difficulty_score: float
-    category: str
-    has_code: bool
-    language_detected: str
-    token_count: int
+    """
+    記錄元數據結構
+    
+    包含記錄的基本元數據和從 flags 動態合併的欄位
+    """
+    # 基本必需欄位
+    tag: str                    # 記錄標籤/類別
+    source_index: int          # 原始資料集中的索引
+    
+    # 可選的 flags 欄位（會從原始記錄的 flags 動態合併）
+    refusal: bool              # 是否為拒絕回答
+    unsolicited: bool          # 是否為主動提供的內容
+    nsfw: bool                 # 是否包含不當內容
+    pii: bool                  # 是否包含個人識別資訊
+    disclaimer: bool           # 是否需要免責聲明
+    
+    # 其他可能的動態欄位（支援從 flags 合併任意鍵值對）
+    # 注意：TypedDict 的 total=False 允許所有欄位都是可選的
 
 
 # 明確定義處理配置結構

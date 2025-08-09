@@ -6,9 +6,10 @@ Workflow State Type Definitions
 根據系統設計文檔第677行要求實現
 """
 
-from typing import List, Optional, Dict
-from typing_extensions import TypedDict, Annotated
+from typing import List, Optional
+
 from langgraph.graph import add_messages
+from typing_extensions import TypedDict, Annotated
 
 from .dataset import (
     OriginalRecord,

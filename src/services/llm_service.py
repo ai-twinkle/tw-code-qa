@@ -5,10 +5,10 @@ LLM Service Module - Simplified using LangGraph Factory
 使用 LangGraph 內建工廠提供統一的 LLM 介面
 """
 
-from typing import List, Dict, Union, Optional, Protocol
-from dataclasses import dataclass
 import time
-from langchain_core.language_models import BaseChatModel
+from dataclasses import dataclass
+from typing import List, Dict, Union, Protocol
+
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 
 from ..constants.llm import LLMModel, LLMProvider
@@ -43,20 +43,24 @@ class LLMService:
         # 實際專案中應該使用真實的 LangChain 客戶端
         # 這裡提供一個可以被測試 mock 的版本
         return self._create_real_client()
-    
-    def _create_real_client(self) -> ChatModelProtocol:
+
+    @staticmethod
+    def _create_real_client() -> ChatModelProtocol:
         """建立真實的 LLM 客戶端"""
         # 為了型別安全，我們需要返回符合協議的物件
         class MockChatModel:
-            def invoke(self, messages: List[BaseMessage]) -> BaseMessage:
+            @staticmethod
+            def invoke(_messages: List[BaseMessage]) -> BaseMessage:
                 return AIMessage(content="Mock response")
-            
-            async def ainvoke(self, messages: List[BaseMessage]) -> BaseMessage:
+
+            @staticmethod
+            async def ainvoke(_messages: List[BaseMessage]) -> BaseMessage:
                 return AIMessage(content="Mock async response")
         
         return MockChatModel()
-    
-    def _convert_messages(self, messages: Union[List[Dict[str, str]], List[BaseMessage]]) -> List[BaseMessage]:
+
+    @staticmethod
+    def _convert_messages(messages: Union[List[Dict[str, str]], List[BaseMessage]]) -> List[BaseMessage]:
         """轉換訊息格式為 LangChain 格式，支持兩種輸入格式"""
         langchain_messages: List[BaseMessage] = []
         

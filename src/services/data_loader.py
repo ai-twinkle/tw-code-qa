@@ -7,17 +7,16 @@ Data Loading Service Module
 
 import json
 import logging
-from pathlib import Path
-from typing import List, Iterator, Optional, Dict, Union, cast
 from abc import ABC, abstractmethod
+from pathlib import Path
+from typing import Iterator, Dict, Union, cast
 
 from ..models.dataset import (
-    OriginalRecord, 
-    DatasetMetadata, 
+    OriginalRecord,
+    DatasetMetadata,
     Language,
-    ComplexityLevel
+    ComplexityLevel, RecordMetadata
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +103,7 @@ class OpenCoderDataLoader(DataLoaderInterface):
                     flags[str(key)] = value
         
         # 建立元資料
-        metadata: Dict[str, Union[str, int, float, bool]] = {
+        metadata: RecordMetadata = {
             "tag": tag,
             "source_index": idx,
         }

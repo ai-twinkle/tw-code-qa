@@ -5,15 +5,14 @@ Test module for LLM Service
 根據系統設計文檔的測試覆蓋率要求 (>= 90%)
 """
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
-from typing import List, Dict
+import sys
 import time
+from pathlib import Path
+from unittest.mock import Mock, patch
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-import sys
-from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent.parent.parent))
 
 from src.services.llm_service import LLMService, LLMResponse, LLMFactory

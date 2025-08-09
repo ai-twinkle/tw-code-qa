@@ -40,6 +40,24 @@ class ErrorRecord:
 
 
 @dataclass
+class QualityMetric:
+    """品質指標"""
+    metric_name: str
+    score: float
+    max_score: float
+    description: str
+    
+    def __post_init__(self) -> None:
+        """驗證品質指標"""
+        if self.score < 0 or self.score > self.max_score:
+            raise ValueError(f"Score {self.score} must be between 0 and {self.max_score}")
+    
+    def get_percentage(self) -> float:
+        """獲取百分比分數"""
+        return (self.score / self.max_score) * 100.0
+
+
+@dataclass
 class QualityAssessment:
     """品質評估結果"""
     record_id: str
@@ -168,6 +186,7 @@ class BatchQualityReport:
 __all__ = [
     "ErrorType",
     "ErrorRecord", 
+    "QualityMetric",
     "QualityAssessment",
     "QualityReport",
     "BatchQualityReport",

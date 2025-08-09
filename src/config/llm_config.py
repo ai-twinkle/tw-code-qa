@@ -211,8 +211,8 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
         "output_price_per_1k": 0.010,   # $10.00 per 1M tokens (verified)
     },
     "gpt-4.1": {
-        "input_price_per_1k": 0.015,    # $15.00 per 1M tokens (estimated)
-        "output_price_per_1k": 0.060,   # $60.00 per 1M tokens (estimated)
+        "input_price_per_1k": 0.002,    # $2.00 per 1M tokens (verified)
+        "output_price_per_1k": 0.008,   # $8.00 per 1M tokens (verified)
     },
     "claude-4-sonnet": {
         "input_price_per_1k": 0.003,    # $3.00 per 1M tokens (verified Anthropic)

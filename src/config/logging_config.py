@@ -3,6 +3,8 @@ Logging configuration for the system
 日誌配置
 """
 
+import logging
+import logging.config
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Union
@@ -313,6 +315,47 @@ def get_testing_logging_config() -> LoggingSystemConfig:
         debug_mode=True
     )
 
+
+def setup_logging(log_level: str = "INFO", verbose: bool = False) -> None:
+    """
+    設定日誌系統
+    
+    Args:
+        log_level: 日誌級別 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        verbose: 是否啟用詳細模式
+    """
+    try:
+        # 轉換字符串到LogLevel枚舉
+        level_enum = LogLevel(log_level.upper())
+    except ValueError:
+        level_enum = LogLevel.INFO
+    
+    # 根據verbose設定決定console和debug模式
+    console_level = LogLevel.DEBUG if verbose else level_enum
+    debug_mode = verbose or level_enum == LogLevel.DEBUG
+    
+    # 獲取當前環境的日誌配置
+    from src.config.settings import get_current_environment
+    environment = get_current_environment()
+    
+    if environment == "production":
+        config = get_production_logging_config()
+    elif environment == "testing":
+        config = get_testing_logging_config()
+    else:  # development or others
+        config = get_development_logging_config()
+    
+    # 覆蓋console級別
+    config["handlers"]["console"]["level"] = console_level.value
+    config["root"]["level"] = level_enum.value
+    
+    # 確保日誌目錄存在
+    ensure_log_directory()
+    
+    # 應用配置
+    logging.config.dictConfig(config)
+
+
 # 特殊用途的日誌器名稱常數
 class LoggerNames:
     """日誌器名稱常數"""
@@ -390,6 +433,7 @@ __all__ = [
     "get_development_logging_config",
     "get_production_logging_config", 
     "get_testing_logging_config",
+    "setup_logging",
     
     # Constants class
     "LoggerNames",

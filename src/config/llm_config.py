@@ -254,6 +254,22 @@ def calculate_cost(model_name: str, input_tokens: int, output_tokens: int) -> fl
     return input_cost + output_cost
 
 
+def get_llm_config(model_name: str = "gpt-4") -> ModelConfig:
+    """取得 LLM 配置
+    
+    Args:
+        model_name: 模型名稱，預設為 gpt-4
+        
+    Returns:
+        ModelConfig: LLM 配置
+    """
+    config = get_model_config(model_name)
+    if config is None:
+        # 返回預設配置
+        return DEFAULT_LLM_CONFIGS["gpt-4"]
+    return config
+
+
 __all__ = [
     "LLMProvider",
     "ModelTier",
@@ -269,4 +285,5 @@ __all__ = [
     "get_model_config",
     "get_agent_config",
     "calculate_cost",
+    "get_llm_config",
 ]

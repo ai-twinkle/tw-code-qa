@@ -449,3 +449,101 @@ class TestConfigurationIntegration:
                 # 基本配置鍵應該一致（允許額外的鍵）
                 common_keys = {"debug", "log_level", "max_workers"}
                 assert common_keys.issubset(set(config.keys()))
+
+
+class TestGetSettings:
+    """測試 get_settings 函數"""
+
+    def test_get_settings_default(self) -> None:
+        """測試獲取預設設定"""
+        from src.config.settings import get_settings
+        
+        settings = get_settings()
+        
+        # 確認返回的是 SystemSettings 結構
+        assert isinstance(settings, dict)
+        assert "environment" in settings
+        assert "debug" in settings
+        assert "log_level" in settings
+        assert "max_workers" in settings
+        
+        # 確認預設值
+        assert settings["environment"] == get_environment()
+
+    def test_get_settings_with_environment(self) -> None:
+        """測試指定環境獲取設定"""
+        from src.config.settings import get_settings
+        
+        # 測試 development 環境
+        dev_settings = get_settings("development")
+        assert dev_settings["environment"] == "development"
+        assert dev_settings["debug"] is True
+        assert dev_settings["log_level"] == "DEBUG"
+        
+        # 測試 production 環境
+        prod_settings = get_settings("production")
+        assert prod_settings["environment"] == "production"
+        assert prod_settings["debug"] is False
+        assert prod_settings["log_level"] == "WARNING"
+
+    def test_get_settings_with_overrides(self) -> None:
+        """測試使用覆蓋設定"""
+        from src.config.settings import get_settings
+        
+        # 測試覆蓋設定
+        overrides = {
+            "debug": False,
+            "max_workers": 16,
+            "memory_limit_gb": 32,
+            "temp_dir": "/custom/temp"
+        }
+        
+        settings = get_settings("development", overrides=overrides)
+        
+        # 確認覆蓋設定生效
+        assert settings["debug"] is False  # 覆蓋了 development 的 True
+        assert settings["max_workers"] == 16  # 覆蓋了 development 的 2
+        assert settings["memory_limit_gb"] == 32  # 覆蓋了預設的 8
+        assert settings["temp_dir"] == "/custom/temp"  # 覆蓋了預設的 "temp"
+        
+        # 確認其他設定保持不變
+        assert settings["environment"] == "development"
+        assert settings["log_level"] == "DEBUG"  # development 環境的設定
+
+    def test_get_settings_ignore_unknown_overrides(self) -> None:
+        """測試忽略未知的覆蓋設定"""
+        from src.config.settings import get_settings
+        
+        overrides = {
+            "debug": False,
+            "unknown_setting": "should_be_ignored",
+            "another_unknown": 42
+        }
+        
+        settings = get_settings("development", overrides=overrides)
+        
+        # 確認已知設定被覆蓋
+        assert settings["debug"] is False
+        
+        # 確認未知設定被忽略（不存在於返回的設定中）
+        assert "unknown_setting" not in settings
+        assert "another_unknown" not in settings
+
+    def test_get_settings_preserves_defaults(self) -> None:
+        """測試覆蓋設定不影響預設配置"""
+        from src.config.settings import get_settings, DEFAULT_SETTINGS
+        
+        original_debug = DEFAULT_SETTINGS["debug"]
+        original_max_workers = DEFAULT_SETTINGS["max_workers"]
+        
+        # 使用覆蓋設定
+        overrides = {"debug": not original_debug, "max_workers": 999}
+        settings = get_settings(overrides=overrides)
+        
+        # 確認覆蓋設定生效
+        assert settings["debug"] == (not original_debug)
+        assert settings["max_workers"] == 999
+        
+        # 確認原始預設配置未被修改
+        assert DEFAULT_SETTINGS["debug"] == original_debug
+        assert DEFAULT_SETTINGS["max_workers"] == original_max_workers

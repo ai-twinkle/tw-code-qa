@@ -392,6 +392,43 @@ def is_production() -> bool:
     return get_environment() == Environment.PRODUCTION.value
 
 
+def get_settings(env: Optional[str] = None, overrides: Optional[Dict[str, any]] = None) -> SystemSettings:
+    """取得系統設定
+    
+    Args:
+        env: 環境名稱，預設為當前環境
+        overrides: 覆蓋設定的字典，用於測試或特殊情況下覆蓋特定設定值
+        
+    Returns:
+        SystemSettings: 系統設定
+    """
+    if env is None:
+        env = get_environment()
+    
+    # 合併預設設定與環境特定設定
+    settings = DEFAULT_SETTINGS.copy()
+    env_config = ENVIRONMENT_CONFIGS.get(env, {})
+    
+    # 更新設定 - 合併環境特定配置
+    settings.update({
+        "environment": env,
+        "debug": env_config.get("debug", settings["debug"]),
+        "log_level": env_config.get("log_level", settings["log_level"]),
+        "max_workers": env_config.get("max_workers", settings["max_workers"]),
+    })
+    
+    # 應用覆蓋設定（通常用於測試）
+    if overrides:
+        for key, value in overrides.items():
+            if key in settings:
+                settings[key] = value
+            else:
+                # 忽略未知的設定鍵，但可以選擇性地記錄警告
+                pass
+    
+    return settings
+
+
 __all__ = [
     # Enums
     "Environment",
@@ -435,4 +472,5 @@ __all__ = [
     "get_config_for_environment",
     "is_development",
     "is_production",
+    "get_settings",
 ]

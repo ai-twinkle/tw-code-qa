@@ -40,6 +40,7 @@ from .settings import (
     get_config_for_environment,
     is_development,
     is_production,
+    get_settings,
 )
 
 # LLM configuration
@@ -58,6 +59,7 @@ from .llm_config import (
     get_model_config,
     get_agent_config,
     calculate_cost,
+    get_llm_config,
 )
 
 # Logging configuration
@@ -123,6 +125,7 @@ __all__ = [
     "get_config_for_environment",
     "is_development",
     "is_production",
+    "get_settings",
     
     # LLM Configuration
     "LLMProvider",
@@ -139,6 +142,7 @@ __all__ = [
     "get_model_config",
     "get_agent_config",
     "calculate_cost",
+    "get_llm_config",
     
     # Logging Configuration  
     "LoggingLogLevel",

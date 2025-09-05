@@ -650,3 +650,245 @@ class TestConfigurationIntegration:
         prod_index = level_order.index(prod_level)
         
         assert dev_index <= prod_index  # 開發環境級別應該 <= 生產環境級別
+
+
+class TestSetupLogging:
+    """測試日誌系統設置功能"""
+
+    def test_setup_logging_basic(self) -> None:
+        """測試基本日誌設置"""
+        with patch('src.config.logging_config.logging.config.dictConfig') as mock_dict_config:
+            with patch('src.config.settings.get_environment', return_value="development"):
+                from src.config.logging_config import setup_logging
+                
+                setup_logging(log_level="INFO", verbose=False)
+                
+                # 驗證 dictConfig 被調用
+                mock_dict_config.assert_called_once()
+                config = mock_dict_config.call_args[0][0]
+                
+                # 驗證基本結構
+                assert "version" in config
+                assert "handlers" in config
+                assert "loggers" in config
+                assert "root" in config
+
+    def test_setup_logging_debug_mode(self) -> None:
+        """測試調試模式日誌設置"""
+        with patch('src.config.logging_config.logging.config.dictConfig') as mock_dict_config:
+            with patch('src.config.settings.get_environment', return_value="development"):
+                from src.config.logging_config import setup_logging
+                
+                setup_logging(log_level="DEBUG", verbose=True)
+                
+                mock_dict_config.assert_called_once()
+                config = mock_dict_config.call_args[0][0]
+                
+                # 驗證 console 處理器級別設為 DEBUG
+                assert config["handlers"]["console"]["level"] == "DEBUG"
+                assert config["root"]["level"] == "DEBUG"
+
+    def test_setup_logging_production_environment(self) -> None:
+        """測試生產環境日誌設置"""
+        with patch('src.config.logging_config.logging.config.dictConfig') as mock_dict_config:
+            with patch('src.config.settings.get_environment', return_value="production"):
+                from src.config.logging_config import setup_logging
+                
+                setup_logging(log_level="INFO", verbose=False)
+                
+                mock_dict_config.assert_called_once()
+
+    def test_setup_logging_testing_environment(self) -> None:
+        """測試測試環境日誌設置"""
+        with patch('src.config.logging_config.logging.config.dictConfig') as mock_dict_config:
+            with patch('src.config.settings.get_environment', return_value="testing"):
+                from src.config.logging_config import setup_logging
+                
+                setup_logging(log_level="WARNING", verbose=False)
+                
+                mock_dict_config.assert_called_once()
+
+    def test_setup_logging_invalid_level(self) -> None:
+        """測試無效日誌級別處理"""
+        with patch('src.config.logging_config.logging.config.dictConfig') as mock_dict_config:
+            with patch('src.config.settings.get_environment', return_value="development"):
+                from src.config.logging_config import setup_logging
+                
+                # 傳入無效的日誌級別
+                setup_logging(log_level="INVALID_LEVEL", verbose=False)
+                
+                mock_dict_config.assert_called_once()
+                config = mock_dict_config.call_args[0][0]
+                
+                # 應該回退到 INFO 級別
+                assert config["root"]["level"] == "INFO"
+
+    def test_setup_logging_verbose_override(self) -> None:
+        """測試詳細模式覆蓋設置"""
+        with patch('src.config.logging_config.logging.config.dictConfig') as mock_dict_config:
+            with patch('src.config.settings.get_environment', return_value="development"):
+                from src.config.logging_config import setup_logging
+                
+                # verbose=True 應該覆蓋日誌級別為 DEBUG
+                setup_logging(log_level="WARNING", verbose=True)
+                
+                mock_dict_config.assert_called_once()
+                config = mock_dict_config.call_args[0][0]
+                
+                # console 級別應該是 DEBUG（verbose 模式）
+                assert config["handlers"]["console"]["level"] == "DEBUG"
+
+    def test_setup_logging_ensure_directory_called(self) -> None:
+        """測試確保日誌目錄被調用"""
+        with patch('src.config.logging_config.logging.config.dictConfig'):
+            with patch('src.config.logging_config.ensure_log_directory') as mock_ensure:
+                with patch('src.config.settings.get_environment', return_value="development"):
+                    from src.config.logging_config import setup_logging
+                    
+                    setup_logging()
+                    
+                    # 驗證目錄創建函數被調用（至少一次）
+                    assert mock_ensure.call_count >= 1
+
+
+class TestLoggerNames:
+    """測試日誌器名稱常數"""
+
+    def test_logger_names_attributes(self) -> None:
+        """測試日誌器名稱常數屬性"""
+        assert LoggerNames.WORKFLOW == "src.workflow"
+        assert LoggerNames.NODES == "src.workflow.nodes"
+        assert LoggerNames.ANALYZER_DESIGNER == "src.workflow.nodes.analyzer_designer"
+        assert LoggerNames.REPRODUCER == "src.workflow.nodes.reproducer"
+        assert LoggerNames.EVALUATOR == "src.workflow.nodes.evaluator"
+        assert LoggerNames.LLM_SERVICE == "src.services.llm_service"
+        assert LoggerNames.DATA_LOADER == "src.services.data_loader"
+        assert LoggerNames.DATASET_MANAGER == "src.core.dataset_manager"
+        assert LoggerNames.QUALITY == "quality"
+        assert LoggerNames.PERFORMANCE == "performance"
+        assert LoggerNames.ERROR == "error"
+        assert LoggerNames.SECURITY == "security"
+
+    def test_logger_names_consistency(self) -> None:
+        """測試日誌器名稱與配置的一致性"""
+        # 檢查 AGENT_LOG_CONFIGS 中引用的名稱是否存在
+        for agent_config in AGENT_LOG_CONFIGS.values():
+            logger_name = agent_config["logger_name"]
+            # 確保名稱存在於 LoggerNames 類中
+            logger_names_values = [
+                getattr(LoggerNames, attr) for attr in dir(LoggerNames)
+                if not attr.startswith('_')
+            ]
+            assert logger_name in logger_names_values
+
+
+class TestAgentLogConfigs:
+    """測試 Agent 日誌配置"""
+
+    def test_agent_log_configs_structure(self) -> None:
+        """測試 Agent 日誌配置結構"""
+        assert isinstance(AGENT_LOG_CONFIGS, dict)
+        assert len(AGENT_LOG_CONFIGS) >= 3  # 至少有 analyzer_designer, reproducer, evaluator
+        
+        # 檢查每個配置的結構
+        for agent_name, config in AGENT_LOG_CONFIGS.items():
+            assert "logger_name" in config
+            assert isinstance(config["logger_name"], str)
+
+    def test_agent_log_configs_completeness(self) -> None:
+        """測試 Agent 日誌配置完整性"""
+        expected_agents = ["analyzer_designer", "reproducer", "evaluator"]
+        for agent in expected_agents:
+            assert agent in AGENT_LOG_CONFIGS
+
+    def test_agent_specific_configs(self) -> None:
+        """測試 Agent 特定配置"""
+        # 測試 analyzer_designer 配置
+        analyzer_config = AGENT_LOG_CONFIGS["analyzer_designer"]
+        assert analyzer_config["logger_name"] == LoggerNames.ANALYZER_DESIGNER
+        assert "log_translation_details" in analyzer_config
+        assert "log_terminology_decisions" in analyzer_config
+        assert "log_complexity_analysis" in analyzer_config
+        
+        # 測試 reproducer 配置
+        reproducer_config = AGENT_LOG_CONFIGS["reproducer"]
+        assert reproducer_config["logger_name"] == LoggerNames.REPRODUCER
+        assert "log_qa_execution" in reproducer_config
+        assert "log_reasoning_steps" in reproducer_config
+        
+        # 測試 evaluator 配置
+        evaluator_config = AGENT_LOG_CONFIGS["evaluator"]
+        assert evaluator_config["logger_name"] == LoggerNames.EVALUATOR
+        assert "log_semantic_analysis" in evaluator_config
+        assert "log_quality_scores" in evaluator_config
+
+
+class TestLogFilters:
+    """測試日誌過濾器配置"""
+
+    def test_log_filters_structure(self) -> None:
+        """測試日誌過濾器結構"""
+        assert isinstance(LOG_FILTERS, dict)
+        
+        # 檢查預期的過濾器類型
+        expected_filters = ["sensitive_data", "performance_threshold", "quality_threshold"]
+        for filter_type in expected_filters:
+            assert filter_type in LOG_FILTERS
+
+    def test_sensitive_data_filter(self) -> None:
+        """測試敏感資料過濾器"""
+        sensitive_filter = LOG_FILTERS["sensitive_data"]
+        assert "api_keys" in sensitive_filter
+        assert "user_tokens" in sensitive_filter
+        assert "internal_paths" in sensitive_filter
+        
+        # 確保都是布林值
+        for key, value in sensitive_filter.items():
+            assert isinstance(value, bool)
+
+    def test_performance_threshold_filter(self) -> None:
+        """測試效能閾值過濾器"""
+        perf_filter = LOG_FILTERS["performance_threshold"]
+        assert "min_duration_ms" in perf_filter
+        assert "log_slow_operations" in perf_filter
+        
+        # 檢查數據類型
+        assert isinstance(perf_filter["min_duration_ms"], (int, float))
+        assert isinstance(perf_filter["log_slow_operations"], bool)
+
+    def test_quality_threshold_filter(self) -> None:
+        """測試品質閾值過濾器"""
+        quality_filter = LOG_FILTERS["quality_threshold"]
+        assert "min_score_to_log" in quality_filter
+        assert "log_all_failures" in quality_filter
+        
+        # 檢查數據類型
+        assert isinstance(quality_filter["min_score_to_log"], (int, float))
+        assert isinstance(quality_filter["log_all_failures"], bool)
+
+
+class TestModuleExports:
+    """測試模組匯出"""
+
+    def test_all_exports_exist(self) -> None:
+        """測試所有匯出項目都存在"""
+        from src.config import logging_config
+        
+        # 檢查 __all__ 中的每個項目都可以從模組中導入
+        for item in logging_config.__all__:
+            assert hasattr(logging_config, item), f"Missing export: {item}"
+
+    def test_all_exports_complete(self) -> None:
+        """測試匯出列表完整性"""
+        from src.config.logging_config import __all__
+        
+        # 檢查重要的類和函數是否都在 __all__ 中
+        expected_exports = [
+            "LogLevel", "LogFormat", "LoggerNames",
+            "ensure_log_directory", "get_logging_config", "setup_logging",
+            "get_development_logging_config", "get_production_logging_config",
+            "get_testing_logging_config"
+        ]
+        
+        for export in expected_exports:
+            assert export in __all__, f"Missing from __all__: {export}"

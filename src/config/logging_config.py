@@ -335,8 +335,8 @@ def setup_logging(log_level: str = "INFO", verbose: bool = False) -> None:
     debug_mode = verbose or level_enum == LogLevel.DEBUG
     
     # 獲取當前環境的日誌配置
-    from src.config.settings import get_current_environment
-    environment = get_current_environment()
+    from src.config.settings import get_environment
+    environment = get_environment()
     
     if environment == "production":
         config = get_production_logging_config()

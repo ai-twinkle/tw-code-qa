@@ -26,7 +26,13 @@ This project is a system for converting and processing Traditional Chinese Code-
 
 ## Usage
 
-Run the main script with the dataset path:
+First, download the dataset:
+
+```bash
+uv run python scripts/download_dataset.py
+```
+
+Then, run the main script with the dataset path:
 
 ```bash
 uv run python main.py --dataset-path data/opencoder_dataset_educational_instruct --dataset-type opencoder

@@ -133,12 +133,13 @@ class QAExecutionResult:
 
 
 @dataclass
+@dataclass
 class ProcessedRecord:
     """處理完成的記錄"""
     original_record: OriginalRecord
-    translation_result: TranslationResult
-    original_qa_result: QAExecutionResult
-    translated_qa_result: QAExecutionResult
+    translation_result: Optional[TranslationResult]
+    original_qa_result: Optional[QAExecutionResult]
+    translated_qa_result: Optional[QAExecutionResult]
     processing_status: ProcessingStatus
     final_quality_score: float
     processing_time: float

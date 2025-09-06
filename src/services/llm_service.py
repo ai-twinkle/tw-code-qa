@@ -50,12 +50,40 @@ class LLMService:
         # 為了型別安全，我們需要返回符合協議的物件
         class MockChatModel:
             @staticmethod
-            def invoke(_messages: List[BaseMessage]) -> BaseMessage:
-                return AIMessage(content="Mock response")
+            def invoke(messages: List[BaseMessage]) -> BaseMessage:
+                # 提供更真實的 mock 回應，根據輸入內容返回不同的回應
+                content = messages[-1].content if messages else ""
+                
+                # 如果是語義評估請求
+                if "語義一致性" in content or "semantic" in content.lower() or "評估標準" in content or "evaluation" in content.lower():
+                    return AIMessage(content="8.5")
+                
+                # 如果是翻譯請求
+                elif "翻譯" in content or "translate" in content.lower():
+                    return AIMessage(content="這是一個翻譯後的程式問題示例。")
+                
+                # 如果是QA執行請求  
+                elif "執行" in content or "execute" in content.lower() or "回答" in content:
+                    return AIMessage(content="根據題目要求，我需要分析這個程式問題並提供解答。這是一個示例回答。")
+                
+                return AIMessage(content="這是一個開發模式的 mock 回應，請配置真實的 LLM API 以獲得實際結果。")
 
             @staticmethod
-            async def ainvoke(_messages: List[BaseMessage]) -> BaseMessage:
-                return AIMessage(content="Mock async response")
+            async def ainvoke(messages: List[BaseMessage]) -> BaseMessage:
+                # 非同步版本，返回相同的邏輯
+                content = messages[-1].content if messages else ""
+                
+                # 如果是語義評估請求
+                if "語義一致性" in content or "semantic" in content.lower() or "評估標準" in content or "evaluation" in content.lower():
+                    return AIMessage(content="8.5")
+                
+                # 如果是翻譯請求
+                elif "翻譯" in content or "translate" in content.lower():
+                    return AIMessage(content="這是一個翻譯後的程式問題示例。")
+                elif "執行" in content or "execute" in content.lower() or "回答" in content:
+                    return AIMessage(content="根據題目要求，我需要分析這個程式問題並提供解答。這是一個示例回答。")
+                
+                return AIMessage(content="這是一個開發模式的 mock 回應，請配置真實的 LLM API 以獲得實際結果。")
         
         return MockChatModel()
 

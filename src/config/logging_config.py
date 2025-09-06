@@ -245,6 +245,34 @@ LOGGER_CONFIGS: Dict[str, LoggerConfig] = {
 }
 
 # 獲取完整的日誌配置
+def convert_handler_config(handler_config: HandlerConfig) -> Dict:
+    """Convert custom HandlerConfig to standard Python logging handler config"""
+    config = {
+        "level": handler_config["level"],
+        "formatter": handler_config["format_type"]
+    }
+    
+    # Map handler_type to class
+    if handler_config["handler_type"] == "StreamHandler":
+        config["class"] = "logging.StreamHandler"
+    elif handler_config["handler_type"] == "RotatingFileHandler":
+        config["class"] = "logging.handlers.RotatingFileHandler"
+        config["filename"] = handler_config["filename"]
+        config["maxBytes"] = handler_config["max_bytes"]
+        config["backupCount"] = handler_config["backup_count"]
+        if handler_config["encoding"]:
+            config["encoding"] = handler_config["encoding"]
+    elif handler_config["handler_type"] == "TimedRotatingFileHandler":
+        config["class"] = "logging.handlers.TimedRotatingFileHandler"
+        config["filename"] = handler_config["filename"]
+        config["when"] = handler_config["when"]
+        config["interval"] = handler_config["interval"]
+        config["backupCount"] = handler_config["backup_count"]
+        if handler_config["encoding"]:
+            config["encoding"] = handler_config["encoding"]
+    
+    return config
+
 def get_logging_config(
     log_dir: Union[str, Path] = DEFAULT_LOG_DIR,
     console_level: LogLevel = LogLevel.INFO,
@@ -263,9 +291,14 @@ def get_logging_config(
     Returns:
         完整的日誌系統配置
     """
-    handlers = get_handler_configs(log_dir)
+    handler_configs = get_handler_configs(log_dir)
     
-    # 如果是調試模式，調整日誌級別
+    # Convert custom handler configs to standard logging config format
+    handlers = {}
+    for name, config in handler_configs.items():
+        handlers[name] = convert_handler_config(config)
+    
+    # If debug mode, adjust log levels
     if debug_mode:
         handlers["console"]["level"] = LogLevel.DEBUG.value
         for logger_config in LOGGER_CONFIGS.values():
@@ -277,7 +310,14 @@ def get_logging_config(
     return {
         "version": 1,
         "disable_existing_loggers": False,
-        "formatters": LOG_FORMATS,
+        "formatters": {
+            name: {
+                "format": config["format_string"],
+                "datefmt": config["date_format"],
+                "style": config["style"]
+            }
+            for name, config in LOG_FORMATS.items()
+        },
         "handlers": handlers,
         "loggers": LOGGER_CONFIGS,
         "root": {

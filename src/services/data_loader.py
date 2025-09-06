@@ -51,23 +51,20 @@ class OpenCoderDataLoader(DataLoaderInterface):
         try:
             self.logger.info(f"Loading dataset from {source_path}")
             
-            # 使用 pyarrow 直接讀取 Arrow 檔案
-            import pyarrow as pa
+            # 使用 datasets 庫載入 HuggingFace 格式的資料集
+            from datasets import load_from_disk
             
-            # 尋找 Arrow 檔案
-            arrow_files = list(Path(source_path).glob("**/*.arrow"))
-            if not arrow_files:
-                raise DataLoadError(f"No arrow files found in {source_path}")
+            # 載入資料集
+            dataset = load_from_disk(source_path)
             
-            arrow_file = arrow_files[0]  # 使用第一個找到的檔案
-            
-            # 讀取 Arrow 檔案
-            with pa.memory_map(str(arrow_file), 'r') as source:
-                reader = pa.ipc.RecordBatchFileReader(source)
-                table = reader.read_all()
-            
-            # 轉換為 Python 記錄
-            records = table.to_pylist()
+            # 檢查是否有 train split，若沒有則使用第一個可用的 split
+            if 'train' in dataset:
+                records = dataset['train']
+            else:
+                # 取得第一個可用的 split
+                split_name = list(dataset.keys())[0]
+                records = dataset[split_name]
+                self.logger.info(f"Using split '{split_name}' as no 'train' split found")
             
             # 遍歷並解析記錄
             for idx, record_dict in enumerate(records):

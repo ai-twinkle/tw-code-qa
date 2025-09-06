@@ -44,12 +44,14 @@ def route_after_evaluation(state: WorkflowState) -> Literal["analyzer_designer",
     """
     try:
         processing_status = state.get("processing_status", ProcessingStatus.PENDING)
+        current_record = state.get("current_record")
+        record_id = current_record.id if current_record else "unknown"
         
         if processing_status == ProcessingStatus.RETRY_NEEDED:
-            logger.info(f"Record {state.get('current_record', {}).get('id', 'unknown')} needs retry")
+            logger.info(f"Record {record_id} needs retry")
             return "analyzer_designer"
         else:
-            logger.info(f"Record {state.get('current_record', {}).get('id', 'unknown')} completed with status: {processing_status}")
+            logger.info(f"Record {record_id} completed with status: {processing_status}")
             return "end"
             
     except Exception as e:

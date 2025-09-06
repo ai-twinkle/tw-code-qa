@@ -20,6 +20,7 @@ from ..constants.dataset import DEFAULT_BATCH_SIZE, PROGRESS_SAVE_INTERVAL, PROG
 from ..models.dataset import OriginalRecord, ProcessedRecord, DatasetMetadata, ProcessingStatus
 from ..models.quality import BatchQualityReport, QualityReport, ErrorRecord, ErrorType
 from ..services.data_loader import DataLoaderFactory, DataLoadError
+from ..utils.format_converter import DataFormatConverter
 from ..workflow.graph import WorkflowManager
 from ..workflow.state import create_initial_state, WorkflowState
 
@@ -56,6 +57,9 @@ class DatasetManager:
         
         # 初始化工作流管理器
         self.workflow_manager = WorkflowManager(enable_checkpointing=enable_checkpointing)
+        
+        # 初始化格式轉換器
+        self.format_converter = DataFormatConverter()
         
         # 載入系統配置
         self.config = get_config_for_environment()
@@ -290,11 +294,9 @@ class DatasetManager:
         try:
             output_file = self.output_dir / f"intermediate_results_{int(time.time())}.jsonl"
             
-            # 簡化的保存邏輯
-            with open(output_file, 'w', encoding='utf-8') as f:
-                for record in processed_records[-self.batch_size:]:  # 只保存最新的批次
-                    # 這裡應該實現 JSON 序列化
-                    f.write(f"{{'record_id': '{record.original_record.id}', 'status': '{record.processing_status.value}'}}\n")
+            # 使用格式轉換器保存最新的批次
+            latest_batch = processed_records[-self.batch_size:] if len(processed_records) > self.batch_size else processed_records
+            self.format_converter.export_records(latest_batch, output_file, format_type='jsonl')
             
             self.logger.debug(f"Intermediate results saved to {output_file}")
             
@@ -304,23 +306,21 @@ class DatasetManager:
     def _save_final_results(self, processed_records: List[ProcessedRecord], batch_report: BatchQualityReport):
         """保存最終結果"""
         try:
-            # 保存處理後的記錄
+            # 保存處理後的記錄 - 使用格式轉換器
             records_file = self.output_dir / "processed_records.jsonl"
-            with open(records_file, 'w', encoding='utf-8') as f:
-                for record in processed_records:
-                    # 這裡應該實現完整的 JSON 序列化
-                    f.write(f"{{'record_id': '{record.original_record.id}', 'status': '{record.processing_status.value}'}}\n")
+            self.format_converter.export_records(processed_records, records_file, format_type='jsonl')
             
-            # 保存品質報告
+            # 保存品質報告 - 使用格式轉換器
             report_file = self.output_dir / "quality_report.json"
-            with open(report_file, 'w', encoding='utf-8') as f:
-                # 這裡應該實現品質報告的 JSON 序列化
-                f.write(f"{{'total_records': {batch_report.total_records}, 'success_rate': {batch_report.get_success_rate()}}}\n")
+            self.format_converter.export_quality_report(batch_report, report_file)
             
             self.logger.info(f"Final results saved to {self.output_dir}")
+            self.logger.info(f"Records file: {records_file}")
+            self.logger.info(f"Quality report: {report_file}")
             
         except Exception as e:
             self.logger.error(f"Failed to save final results: {e}")
+            raise DatasetProcessingError(f"Failed to save final results: {e}")
     
     def _generate_batch_report(self, processed_records: List[ProcessedRecord]) -> BatchQualityReport:
         """生成批次品質報告"""

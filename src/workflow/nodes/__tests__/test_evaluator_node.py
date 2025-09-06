@@ -104,7 +104,8 @@ def sample_workflow_state(sample_qa_results):
 class TestEvaluatorAgent:
     """評估者 Agent 測試類"""
     
-    def test_init(self):
+    @patch('src.services.llm_service.is_production', return_value=False)
+    def test_init(self, mock_is_production):
         """測試 EvaluatorAgent 初始化"""
         agent = EvaluatorAgent()
         

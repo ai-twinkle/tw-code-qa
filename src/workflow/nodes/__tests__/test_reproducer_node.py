@@ -92,7 +92,8 @@ def sample_workflow_state(sample_original_record, sample_translation_result):
 class TestReproducerAgent:
     """再現者 Agent 測試類"""
     
-    def test_init(self):
+    @patch('src.services.llm_service.is_production', return_value=False)
+    def test_init(self, mock_is_production):
         """測試 ReproducerAgent 初始化"""
         agent = ReproducerAgent()
         
@@ -180,7 +181,8 @@ class TestReproducerAgent:
         with pytest.raises(Exception, match="QA reasoning failed"):
             agent.execute_qa_reasoning("test question", Language.ENGLISH)
     
-    def test_extract_reasoning_steps(self):
+    @patch('src.services.llm_service.is_production', return_value=False)
+    def test_extract_reasoning_steps(self, mock_is_production):
         """測試推理步驟提取"""
         # 測試編號步驟提取
         answer_with_numbers = """
@@ -200,7 +202,8 @@ class TestReproducerAgent:
         assert "1. Understanding the problem" in steps
         assert "4. Testing the code" in steps
     
-    def test_extract_reasoning_steps_chinese(self):
+    @patch('src.services.llm_service.is_production', return_value=False)
+    def test_extract_reasoning_steps_chinese(self, mock_is_production):
         """測試中文推理步驟提取"""
         answer_chinese = """
         解決方案如下：
@@ -218,7 +221,8 @@ class TestReproducerAgent:
         assert len(steps) >= 4
         assert any("一、理解問題" in step for step in steps)
     
-    def test_extract_reasoning_steps_keywords(self):
+    @patch('src.services.llm_service.is_production', return_value=False)
+    def test_extract_reasoning_steps_keywords(self, mock_is_production):
         """測試關鍵字步驟提取"""
         answer_with_keywords = """
         首先，我們需要理解問題。
@@ -234,7 +238,8 @@ class TestReproducerAgent:
         assert any("首先" in step for step in steps)
         assert any("最後" in step for step in steps)
     
-    def test_extract_reasoning_steps_fallback(self):
+    @patch('src.services.llm_service.is_production', return_value=False)
+    def test_extract_reasoning_steps_fallback(self, mock_is_production):
         """測試推理步驟提取回退機制"""
         answer_no_structure = """
         This is a simple answer without clear structure.

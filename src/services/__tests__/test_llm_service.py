@@ -15,7 +15,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 sys.path.append(str(Path(__file__).parent.parent.parent.parent))
 
-from src.services.llm_service import LLMService, LLMResponse, LLMFactory
+from src.services.llm_service import LLMService, LLMResponse, LLMFactory, MissingAPIKeyError
 from src.constants.llm import LLMProvider, LLMModel
 
 
@@ -285,3 +285,242 @@ class TestLLMFactory:
             assert result.content == "整合測試回應"
             assert result.provider == "openai"
             assert result.model_name == "gpt-4o"
+
+
+class TestProductionModeAPIKeyValidation:
+    """測試生產模式下的 API 密鑰驗證"""
+
+    @patch('src.services.llm_service.is_production', return_value=True)
+    @patch.dict('os.environ', {}, clear=True)
+    def test_production_mode_missing_openai_api_key(self, mock_is_production) -> None:
+        """測試生產模式下缺少 OpenAI API 密鑰"""
+        with pytest.raises(MissingAPIKeyError) as exc_info:
+            LLMService(LLMProvider.OPENAI, LLMModel.GPT_4O)
+        
+        error_message = str(exc_info.value)
+        assert "在生產環境中必須配置 OPENAI_API_KEY" in error_message
+        assert "cp .env.example .env" in error_message
+        assert "OPENAI_API_KEY=your_actual_api_key" in error_message
+
+    @patch('src.services.llm_service.is_production', return_value=True)
+    @patch.dict('os.environ', {}, clear=True)
+    def test_production_mode_missing_anthropic_api_key(self, mock_is_production) -> None:
+        """測試生產模式下缺少 Anthropic API 密鑰"""
+        with pytest.raises(MissingAPIKeyError) as exc_info:
+            LLMService(LLMProvider.ANTHROPIC, LLMModel.CLAUDE_4_SONNET)
+        
+        error_message = str(exc_info.value)
+        assert "在生產環境中必須配置 ANTHROPIC_API_KEY" in error_message
+
+    @patch('src.services.llm_service.is_production', return_value=True)
+    @patch.dict('os.environ', {}, clear=True)
+    def test_production_mode_missing_google_api_key(self, mock_is_production) -> None:
+        """測試生產模式下缺少 Google API 密鑰"""
+        with pytest.raises(MissingAPIKeyError) as exc_info:
+            LLMService(LLMProvider.GOOGLE, LLMModel.GEMINI_2_5_FLASH)
+        
+        error_message = str(exc_info.value)
+        assert "在生產環境中必須配置 GOOGLE_API_KEY" in error_message
+
+    @patch('src.services.llm_service.is_production', return_value=True)
+    @patch('src.services.llm_service.init_chat_model')
+    @patch.dict('os.environ', {'OPENAI_API_KEY': 'test_key'})
+    def test_production_mode_with_valid_api_key(self, mock_init, mock_is_production) -> None:
+        """測試生產模式下有有效 API 密鑰"""
+        mock_init.return_value = Mock()
+        
+        # 不應該拋出異常
+        service = LLMService(LLMProvider.OPENAI, LLMModel.GPT_4O)
+        assert service.provider == LLMProvider.OPENAI
+        assert service.model == LLMModel.GPT_4O
+
+    @patch('src.services.llm_service.is_production', return_value=True)
+    @patch('src.services.llm_service.init_chat_model')
+    @patch.dict('os.environ', {'OPENAI_API_KEY': 'test_key'})
+    def test_production_mode_init_chat_model_failure(self, mock_init, mock_is_production) -> None:
+        """測試生產模式下 init_chat_model 失敗"""
+        mock_init.side_effect = Exception("API 連接失敗")
+        
+        with pytest.raises(RuntimeError) as exc_info:
+            LLMService(LLMProvider.OPENAI, LLMModel.GPT_4O)
+        
+        error_message = str(exc_info.value)
+        assert "LLM 客戶端初始化失敗" in error_message
+        assert "API 連接失敗" in error_message
+        assert "提供者: openai" in error_message
+
+
+class TestDevelopmentModeAPIKeyValidation:
+    """測試開發模式下的 API 密鑰驗證"""
+
+    @patch('src.services.llm_service.is_production', return_value=False)
+    @patch.dict('os.environ', {}, clear=True)
+    def test_development_mode_missing_api_key_uses_mock(self, mock_is_production) -> None:
+        """測試開發模式下缺少 API 密鑰使用 mock 客戶端"""
+        service = LLMService(LLMProvider.OPENAI, LLMModel.GPT_4O)
+        
+        assert service.provider == LLMProvider.OPENAI
+        assert service.model == LLMModel.GPT_4O
+        # 檢查是否使用了 mock 客戶端
+        assert hasattr(service._client, 'invoke')
+
+    @patch('src.services.llm_service.is_production', return_value=False)
+    @patch.dict('os.environ', {}, clear=True)
+    def test_development_mode_mock_client_invoke(self, mock_is_production) -> None:
+        """測試開發模式下 mock 客戶端的調用"""
+        service = LLMService(LLMProvider.OPENAI, LLMModel.GPT_4O)
+        
+        messages = [{"role": "user", "content": "測試問題"}]
+        result = service.invoke(messages)
+        
+        assert isinstance(result, LLMResponse)
+        assert "開發模式的 mock 回應" in result.content
+        assert result.provider == "openai"
+        assert result.model_name == "gpt-4o"
+
+    @patch('src.services.llm_service.is_production', return_value=False)
+    @patch.dict('os.environ', {}, clear=True)
+    @pytest.mark.asyncio
+    async def test_development_mode_mock_client_ainvoke(self, mock_is_production) -> None:
+        """測試開發模式下 mock 客戶端的異步調用"""
+        service = LLMService(LLMProvider.OPENAI, LLMModel.GPT_4O)
+        
+        messages = [{"role": "user", "content": "異步測試問題"}]
+        result = await service.ainvoke(messages)
+        
+        assert isinstance(result, LLMResponse)
+        assert "開發模式的 mock 回應" in result.content
+
+    @patch('src.services.llm_service.is_production', return_value=False)
+    @patch('src.services.llm_service.init_chat_model')
+    @patch.dict('os.environ', {}, clear=True)
+    def test_development_mode_init_chat_model_failure_uses_mock(self, mock_init, mock_is_production) -> None:
+        """測試開發模式下 init_chat_model 失敗使用 mock 客戶端"""
+        mock_init.side_effect = Exception("模擬初始化失敗")
+        
+        # 不應該拋出異常，而是使用 mock 客戶端
+        service = LLMService(LLMProvider.OPENAI, LLMModel.GPT_4O)
+        assert service.provider == LLMProvider.OPENAI
+
+
+class TestAPIKeyValidationMethods:
+    """測試 API 密鑰驗證相關方法"""
+
+    def test_check_api_key_openai_with_key(self) -> None:
+        """測試 OpenAI API 密鑰檢查 - 有密鑰"""
+        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test_key'}):
+            service = LLMService.__new__(LLMService)
+            service.provider = LLMProvider.OPENAI
+            assert service._check_api_key() is True
+
+    def test_check_api_key_openai_without_key(self) -> None:
+        """測試 OpenAI API 密鑰檢查 - 無密鑰"""
+        with patch.dict('os.environ', {}, clear=True):
+            service = LLMService.__new__(LLMService)
+            service.provider = LLMProvider.OPENAI
+            assert service._check_api_key() is False
+
+    def test_check_api_key_anthropic_with_key(self) -> None:
+        """測試 Anthropic API 密鑰檢查 - 有密鑰"""
+        with patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'test_key'}):
+            service = LLMService.__new__(LLMService)
+            service.provider = LLMProvider.ANTHROPIC
+            assert service._check_api_key() is True
+
+    def test_check_api_key_google_with_key(self) -> None:
+        """測試 Google API 密鑰檢查 - 有密鑰"""
+        with patch.dict('os.environ', {'GOOGLE_API_KEY': 'test_key'}):
+            service = LLMService.__new__(LLMService)
+            service.provider = LLMProvider.GOOGLE
+            assert service._check_api_key() is True
+
+    def test_check_api_key_ollama_always_true(self) -> None:
+        """測試 Ollama API 密鑰檢查 - 總是返回 True"""
+        with patch.dict('os.environ', {}, clear=True):
+            service = LLMService.__new__(LLMService)
+            service.provider = LLMProvider.OLLAMA
+            assert service._check_api_key() is True
+
+    def test_get_required_api_key_name_openai(self) -> None:
+        """測試獲取所需 API 密鑰名稱 - OpenAI"""
+        service = LLMService.__new__(LLMService)
+        service.provider = LLMProvider.OPENAI
+        assert service._get_required_api_key_name() == "OPENAI_API_KEY"
+
+    def test_get_required_api_key_name_anthropic(self) -> None:
+        """測試獲取所需 API 密鑰名稱 - Anthropic"""
+        service = LLMService.__new__(LLMService)
+        service.provider = LLMProvider.ANTHROPIC
+        assert service._get_required_api_key_name() == "ANTHROPIC_API_KEY"
+
+    def test_get_required_api_key_name_google(self) -> None:
+        """測試獲取所需 API 密鑰名稱 - Google"""
+        service = LLMService.__new__(LLMService)
+        service.provider = LLMProvider.GOOGLE
+        assert service._get_required_api_key_name() == "GOOGLE_API_KEY"
+
+    def test_get_required_api_key_name_ollama(self) -> None:
+        """測試獲取所需 API 密鑰名稱 - Ollama"""
+        service = LLMService.__new__(LLMService)
+        service.provider = LLMProvider.OLLAMA
+        assert service._get_required_api_key_name() == "OLLAMA_HOST (可選)"
+
+
+class TestMockClientBehavior:
+    """測試 Mock 客戶端行為"""
+
+    def test_mock_client_semantic_evaluation_response(self) -> None:
+        """測試 Mock 客戶端語義評估回應"""
+        from src.services.llm_service import LLMService
+        
+        mock_client = LLMService._create_mock_client()
+        
+        # 測試語義評估請求
+        messages = [HumanMessage(content="請評估語義一致性")]
+        response = mock_client.invoke(messages)
+        assert response.content == "8.5"
+
+    def test_mock_client_translation_response(self) -> None:
+        """測試 Mock 客戶端翻譯回應"""
+        from src.services.llm_service import LLMService
+        
+        mock_client = LLMService._create_mock_client()
+        
+        # 測試翻譯請求
+        messages = [HumanMessage(content="請翻譯這個程式問題")]
+        response = mock_client.invoke(messages)
+        assert "翻譯" in response.content
+
+    def test_mock_client_execution_response(self) -> None:
+        """測試 Mock 客戶端執行回應"""
+        from src.services.llm_service import LLMService
+        
+        mock_client = LLMService._create_mock_client()
+        
+        # 測試執行請求
+        messages = [HumanMessage(content="請執行這個程式問題")]
+        response = mock_client.invoke(messages)
+        assert "執行" in response.content or "回答" in response.content
+
+    def test_mock_client_default_response(self) -> None:
+        """測試 Mock 客戶端預設回應"""
+        from src.services.llm_service import LLMService
+        
+        mock_client = LLMService._create_mock_client()
+        
+        # 測試一般請求
+        messages = [HumanMessage(content="一般問題")]
+        response = mock_client.invoke(messages)
+        assert "開發模式的 mock 回應" in response.content
+
+    @pytest.mark.asyncio
+    async def test_mock_client_async_response(self) -> None:
+        """測試 Mock 客戶端異步回應"""
+        from src.services.llm_service import LLMService
+        
+        mock_client = LLMService._create_mock_client()
+        
+        # 測試異步請求
+        messages = [HumanMessage(content="請評估語義一致性")]
+        response = await mock_client.ainvoke(messages)
+        assert response.content == "8.5"

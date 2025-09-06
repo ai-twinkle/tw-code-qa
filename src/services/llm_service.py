@@ -49,12 +49,14 @@ class LLMService:
                     # 在生產環境中，缺少 API 密鑰時拋出錯誤
                     missing_key = self._get_required_api_key_name()
                     raise MissingAPIKeyError(
+                        "\n" + "=" * 80 + "\n"
                         f"在生產環境中必須配置 {missing_key}。\n"
                         f"請執行以下步驟:\n"
                         f"1. 複製 .env.example 到 .env: cp .env.example .env\n"
                         f"2. 在 .env 文件中設置: {missing_key}=your_actual_api_key\n"
                         f"3. 確保 .env 文件在專案根目錄中\n"
-                        f"4. 重新執行程式"
+                        f"4. 重新執行程式\n" +
+                        "=" * 80 + "\n"
                     )
                 else:
                     print(f"Warning: No API key found for {self.provider.value}. Using mock client for development.")

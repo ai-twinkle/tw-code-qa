@@ -9,13 +9,15 @@ Analyzer Designer Agent Node
 4. 基於 Prompt 的術語一致性管理
 """
 
+import json
 import logging
+import re
 import time
 from typing import List
 
 from typing_extensions import TypedDict
 
-from ..state import WorkflowState, update_state_safely
+from ..state import WorkflowState, update_state_safely, StateUpdateValue
 from ...config.llm_config import get_agent_config
 from ...constants.llm import LLMProvider, LLMModel
 from ...models.dataset import TranslationResult, ProcessingStatus
@@ -72,61 +74,224 @@ class AnalyzerDesignerAgent:
         except Exception as e:
             self.logger.error(f"Failed to initialize LLM service: {e}")
             raise
-    
+
     def analyze_semantic_complexity(self, question: str, answer: str) -> SemanticComplexityContext:
         """
         分析語義複雜度
+
+        Args:
+            question: 英文問題
+            answer: 英文答案
+
+        Returns:
+            語義複雜度分析結果
+        """
+        analysis_prompt = f"""
+        分析語義複雜度 (Analyze the semantic complexity) of the following programming Q&A pair and return your analysis in JSON format.
+
+        **Question:**
+        {question}
+
+        **Answer:**
+        {answer}
+
+        Please provide analysis for:
+        1. Complexity level: "Simple", "Medium", or "Complex"
+        2. Programming languages involved (list)
+        3. Key technical concepts (list)
+        4. Number of code blocks
+        5. Translation challenges (list)
+
+        Response format:
+        {{
+            "complexity": "Simple|Medium|Complex",
+            "programming_languages": ["language1", "language2"],
+            "key_concepts": ["concept1", "concept2"],
+            "code_block_count": number,
+            "translation_challenges": ["challenge1", "challenge2"]
+        }}
+
+        Complexity criteria:
+        - Simple: Basic syntax, single concept, minimal code
+        - Medium: Multiple concepts, moderate code complexity, some abstractions
+        - Complex: Advanced patterns, multiple languages, complex algorithms, extensive code
+
+        Only return the JSON, no additional explanation.
+        """
+
+        try:
+            messages = [{"role": "user", "content": analysis_prompt}]
+            response = self.llm_service.invoke(messages)
+
+            # 解析 LLM 回應
+            response_text = response.content.strip()
+
+            # 嘗試從回應中提取 JSON
+            json_match = re.search(r'\{.*}', response_text, re.DOTALL)
+            if json_match:
+                try:
+                    analysis_data = json.loads(json_match.group())
+
+                    # 驗證和標準化分析結果
+                    complexity = analysis_data.get("complexity", "Medium")
+                    if complexity not in ["Simple", "Medium", "Complex"]:
+                        complexity = "Medium"
+
+                    programming_languages = analysis_data.get("programming_languages", [])
+                    if not isinstance(programming_languages, list):
+                        programming_languages = []
+
+                    key_concepts = analysis_data.get("key_concepts", [])
+                    if not isinstance(key_concepts, list):
+                        key_concepts = ["programming"]
+
+                    code_block_count = analysis_data.get("code_block_count", 0)
+                    if not isinstance(code_block_count, int):
+                        # 回退到計算 ``` 對數
+                        code_block_count = answer.count("```") // 2
+
+                    translation_challenges = analysis_data.get("translation_challenges", [])
+                    if not isinstance(translation_challenges, list):
+                        translation_challenges = ["technical_terms"]
+
+                    # 補充分析：如果 LLM 沒有檢測到程式語言，嘗試自動檢測
+                    if not programming_languages:
+                        programming_languages = self._detect_programming_languages(question + " " + answer)
+
+                    # 補充分析：如果沒有檢測到關鍵概念，基於內容分析
+                    if not key_concepts:
+                        key_concepts = self._extract_key_concepts(question + " " + answer)
+
+                    return {
+                        "complexity": complexity,
+                        "programming_languages": programming_languages,
+                        "key_concepts": key_concepts,
+                        "code_block_count": code_block_count,
+                        "translation_challenges": translation_challenges
+                    }
+
+                except json.JSONDecodeError as e:
+                    self.logger.warning(f"Failed to parse LLM JSON response: {e}")
+                    self.logger.debug(f"Raw response: {response_text[:500]}...")
+
+            # 如果 JSON 解析失敗，使用基於規則的分析作為回退
+            return self._fallback_complexity_analysis(question, answer)
+
+        except Exception as e:
+            self.logger.warning(f"Failed to analyze semantic complexity: {e}")
+            return self._fallback_complexity_analysis(question, answer)
+
+    @staticmethod
+    def _detect_programming_languages(text: str) -> List[str]:
+        """
+        基於內容檢測程式語言
+        
+        Args:
+            text: 要分析的文本
+            
+        Returns:
+            檢測到的程式語言列表
+        """
+        languages = []
+        text_lower = text.lower()
+        
+        # 常見程式語言關鍵詞檢測
+        language_keywords = {
+            "Python": ["python", "def ", "import ", "from ", "__init__", "self.", "pip", "numpy", "pandas"],
+            "JavaScript": ["javascript", "js", "function", "const ", "let ", "var ", "=>", "npm", "node"],
+            "Java": ["java", "class ", "public ", "private ", "static ", "void ", "import java"],
+            "C++": ["c++", "cpp", "#include", "std::", "cout", "cin", "namespace"],
+            "C": ["#include", "printf", "scanf", "main()", "malloc", "free"],
+            "SQL": ["select ", "from ", "where ", "insert ", "update ", "delete ", "join"],
+            "HTML": ["<html", "<div", "<span", "<body", "<!doctype"],
+            "CSS": ["css", "{", "}", "color:", "background:", "margin:", "padding:"],
+            "Shell": ["bash", "#!/bin", "echo ", "grep ", "awk ", "sed "],
+            "Go": ["golang", "go ", "func ", "package ", "import ", "fmt."],
+            "Rust": ["rust", "fn ", "let mut", "use ", "cargo", "impl"],
+            "TypeScript": ["typescript", "interface ", "type ", ": string", ": number"]
+        }
+        
+        for language, keywords in language_keywords.items():
+            if any(keyword in text_lower for keyword in keywords):
+                languages.append(language)
+        
+        return languages if languages else ["Unknown"]
+
+    @staticmethod
+    def _extract_key_concepts(text: str) -> List[str]:
+        """
+        基於內容提取關鍵技術概念
+        
+        Args:
+            text: 要分析的文本
+            
+        Returns:
+            關鍵概念列表
+        """
+        concepts = []
+        text_lower = text.lower()
+        
+        # 技術概念關鍵詞
+        concept_keywords = {
+            "web_development": ["web", "http", "html", "css", "frontend", "backend", "api", "rest"],
+            "data_science": ["data", "analysis", "visualization", "pandas", "numpy", "matplotlib", "jupyter"],
+            "machine_learning": ["ml", "ai", "model", "training", "neural", "tensorflow", "pytorch", "sklearn"],
+            "database": ["database", "sql", "query", "table", "index", "join", "mysql", "postgresql"],
+            "algorithms": ["algorithm", "sort", "search", "complexity", "time", "space", "optimization"],
+            "object_oriented": ["class", "object", "inheritance", "polymorphism", "encapsulation"],
+            "functional_programming": ["function", "lambda", "map", "filter", "reduce", "closure"],
+            "testing": ["test", "unittest", "pytest", "mock", "assert", "coverage"],
+            "security": ["security", "authentication", "encryption", "hash", "token", "ssl"],
+            "performance": ["performance", "optimization", "memory", "cpu", "cache", "profiling"]
+        }
+        
+        for concept, keywords in concept_keywords.items():
+            if any(keyword in text_lower for keyword in keywords):
+                concepts.append(concept)
+        
+        return concepts if concepts else ["programming"]
+    
+    def _fallback_complexity_analysis(self, question: str, answer: str) -> SemanticComplexityContext:
+        """
+        當 LLM 服務不可用時的回退分析
         
         Args:
             question: 英文問題
             answer: 英文答案
             
         Returns:
-            語義複雜度分析結果
+            基礎複雜度分析結果（使用 Unknown 作為預設值）
         """
-        analysis_prompt = f"""
-        請分析以下程式碼問答對的語義複雜度：
-
-        **問題：**
-        {question}
-
-        **答案：**
-        {answer}
-
-        請提供以下分析：
-        1. 複雜度級別：Simple/Medium/Complex
-        2. 涉及的程式語言
-        3. 主要技術概念
-        4. 程式碼區塊數量
-        5. 翻譯難點預測
-
-        請以 JSON 格式回答。
-        """
+        self.logger.warning("Using fallback analysis due to LLM service unavailability")
         
-        try:
-            messages = [{"role": "user", "content": analysis_prompt}]
-            response = self.llm_service.invoke(messages)
+        # 不嘗試猜測複雜度，直接使用 "Unknown"
+        # 這比基於任意規則（如長度）的猜測更誠實和可預測
+        complexity = "Unknown"
+        
+        # 檢測程式語言（保留這個功能，因為它基於明確的關鍵詞）
+        combined_text = question + " " + answer
+        programming_languages = self._detect_programming_languages(combined_text)
+        if not programming_languages:
+            programming_languages = ["programming"]
             
-            # 簡化的分析結果
-            # Count code blocks by counting pairs of backticks (opening and closing)
-            code_block_count = answer.count("```") // 2
-            return {
-                "complexity": "Medium",  # 預設值
-                "programming_languages": ["Python"],  # 預設值
-                "key_concepts": ["programming"],  # 預設值
-                "code_block_count": code_block_count,
-                "translation_challenges": ["technical_terms"]  # 預設值
-            }
-            
-        except Exception as e:
-            self.logger.warning(f"Failed to analyze semantic complexity: {e}")
-            return {
-                "complexity": "Medium",
-                "programming_languages": ["Unknown"],
-                "key_concepts": ["programming"],
-                "code_block_count": 0,
-                "translation_challenges": []
-            }
+        # 檢測技術概念（基於關鍵詞，相對可靠）
+        key_concepts = self._extract_key_concepts(combined_text)
+        if not key_concepts:
+            key_concepts = ["unknown_concepts"]
+        
+        # 計算程式碼區塊數量（這是可以準確計算的）
+        code_block_count = answer.count("```") // 2
+        
+        # 翻譯挑戰無法準確評估，使用空列表
+        translation_challenges = []
+        
+        return {
+            "complexity": complexity,
+            "programming_languages": programming_languages,
+            "key_concepts": key_concepts,
+            "code_block_count": code_block_count,
+            "translation_challenges": translation_challenges
+        }
     
     def translate_question(self, question: str, context: SemanticComplexityContext) -> str:
         """
@@ -308,7 +473,7 @@ def analyzer_designer_node(state: WorkflowState) -> WorkflowState:
         )
         
         # 更新狀態
-        updates = {
+        updates: StateUpdateValue = {
             "translation_result": translation_result,
             "processing_status": ProcessingStatus.PROCESSING
         }

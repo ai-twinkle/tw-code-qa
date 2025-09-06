@@ -225,9 +225,9 @@ class TestAnalyzerDesignerAgent:
         context = agent.analyze_semantic_complexity(question, answer)
         
         # 驗證回退到預設值
-        assert context["complexity"] == "Medium"
-        assert context["programming_languages"] == ["Unknown"]
-        assert context["key_concepts"] == ["programming"]
+        assert context["complexity"] == "Unknown"
+        assert context["programming_languages"] == ["Python"]  # 應該檢測到 Python（從問題文本中）
+        assert context["key_concepts"] == ["object_oriented"]  # 應該檢測到面向對象概念（從 "class" 關鍵詞）
         assert context["translation_challenges"] == []
     
     @patch('src.config.llm_config.get_agent_config')

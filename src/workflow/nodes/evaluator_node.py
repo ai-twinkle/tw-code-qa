@@ -16,7 +16,7 @@ import logging
 import time
 from typing import List, Dict
 
-from ..state import WorkflowState, update_state_safely
+from ..state import WorkflowState, update_state_safely, StateUpdateValue
 from ...config.llm_config import get_agent_config, QUALITY_THRESHOLDS
 from ...constants.llm import LLMProvider, LLMModel
 from ...models.dataset import QAExecutionResult, ProcessingStatus
@@ -366,7 +366,7 @@ def evaluator_node(state: WorkflowState) -> WorkflowState:
             final_status = (ProcessingStatus.COMPLETED if quality_assessment.overall_quality_score >= agent.min_semantic_score
                           else ProcessingStatus.FAILED)
             
-            updates = {
+            updates: StateUpdateValue = {
                 "quality_assessment": quality_assessment,
                 "processing_status": final_status
             }

@@ -431,11 +431,11 @@ class TestDatasetManager:
             total_retries=0
         )
         
-        # 模擬文件寫入錯誤
-        with patch('builtins.open', side_effect=OSError("Permission denied")):
-            # 方法應該正常執行（只記錄錯誤）
-            dataset_manager._save_final_results(processed_records, batch_report)
-            # 不應該拋出異常
+        # 模擬格式轉換器中的文件寫入錯誤
+        with patch.object(dataset_manager.format_converter, 'export_records', side_effect=Exception("Permission denied")):
+            # 現在方法應該拋出 DatasetProcessingError
+            with pytest.raises(DatasetProcessingError, match="Failed to save final results"):
+                dataset_manager._save_final_results(processed_records, batch_report)
 
     def test_generate_batch_report_with_exception(self, dataset_manager: DatasetManager) -> None:
         """測試生成批次報告時異常處理 - covers line 430"""

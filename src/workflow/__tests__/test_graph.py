@@ -256,10 +256,19 @@ class TestWorkflowManagerIntegration:
     def test_route_after_evaluation_retry_needed(self) -> None:
         """測試評估後路由 - 需要重試的情況"""
         from src.workflow.graph import route_after_evaluation
+        from src.models.dataset import OriginalRecord, ComplexityLevel
+
+        # 創建正確的 OriginalRecord 對象
+        current_record = OriginalRecord(
+            id='retry_test',
+            question='Test question',
+            answer='Test answer',
+            source_dataset='test',
+            complexity_level=ComplexityLevel.MEDIUM
+        )
         
-        # 創建正確的狀態字典，其中current_record是一個簡單的字典
         state = {
-            'current_record': {'id': 'retry_test'},
+            'current_record': current_record,
             'processing_status': ProcessingStatus.RETRY_NEEDED
         }
         
@@ -269,9 +278,19 @@ class TestWorkflowManagerIntegration:
     def test_route_after_evaluation_completed(self) -> None:
         """測試評估後路由 - 完成的情況"""
         from src.workflow.graph import route_after_evaluation
+        from src.models.dataset import OriginalRecord, ComplexityLevel
+
+        # 創建正確的 OriginalRecord 對象
+        current_record = OriginalRecord(
+            id='complete_test',
+            question='Test question',
+            answer='Test answer',
+            source_dataset='test',
+            complexity_level=ComplexityLevel.MEDIUM
+        )
         
         state = {
-            'current_record': {'id': 'complete_test'},
+            'current_record': current_record,
             'processing_status': ProcessingStatus.COMPLETED
         }
         

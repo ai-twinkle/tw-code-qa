@@ -169,81 +169,53 @@ class TestOpenCoderDataLoader:
             complexity = data_loader._infer_complexity(tag)
             assert complexity == ComplexityLevel.MEDIUM
     
-    @patch('pyarrow.memory_map')
-    @patch('pyarrow.ipc.RecordBatchFileReader')
-    @patch('pathlib.Path.glob')
-    def test_load_dataset_success(self, mock_glob: Mock, mock_reader_class: Mock, mock_memory_map: Mock, 
+    @patch('datasets.load_from_disk')
+    def test_load_dataset_success(self, mock_load_from_disk: Mock, 
                                  data_loader: OpenCoderDataLoader, mock_dataset_record: Dict[str, object]) -> None:
         """測試資料集載入成功"""
-        # 模擬檔案發現
-        mock_glob.return_value = [Path("test.arrow")]
-        
-        # 模擬 PyArrow 
-        mock_table = Mock()
-        mock_table.to_pylist.return_value = [mock_dataset_record]
-        
-        mock_reader = Mock()
-        mock_reader.read_all.return_value = mock_table
-        mock_reader_class.return_value = mock_reader
-        
-        mock_source = Mock()
-        mock_memory_map.return_value.__enter__.return_value = mock_source
-        
+        # 模擬 HuggingFace dataset
+        mock_dataset = Mock()
+        mock_dataset.__contains__ = Mock(return_value=True)  # 'train' in dataset
+        mock_dataset.__getitem__ = Mock(return_value=[mock_dataset_record])
+        mock_load_from_disk.return_value = mock_dataset
+
         result = list(data_loader.load_dataset("test_path"))
         
         assert len(result) == 1
         assert isinstance(result[0], OriginalRecord)
     
-    @patch('pyarrow.memory_map')
-    @patch('pyarrow.ipc.RecordBatchFileReader')
-    @patch('pathlib.Path.glob')
-    def test_load_dataset_with_train_split(self, mock_glob: Mock, mock_reader_class: Mock, mock_memory_map: Mock,
+    @patch('datasets.load_from_disk')
+    def test_load_dataset_with_train_split(self, mock_load_from_disk: Mock,
                                           data_loader: OpenCoderDataLoader, mock_dataset_record: Dict[str, object]) -> None:
         """測試載入資料集"""
-        mock_glob.return_value = [Path("test.arrow")]
-        
-        # 模擬 PyArrow
-        mock_table = Mock()
-        mock_table.to_pylist.return_value = [mock_dataset_record]
-        
-        mock_reader = Mock()
-        mock_reader.read_all.return_value = mock_table
-        mock_reader_class.return_value = mock_reader
-        
-        mock_source = Mock()
-        mock_memory_map.return_value.__enter__.return_value = mock_source
-        
+        # 模擬 HuggingFace dataset with train split
+        mock_dataset = Mock()
+        mock_dataset.__contains__ = Mock(return_value=True)  # 'train' in dataset
+        mock_dataset.__getitem__ = Mock(return_value=[mock_dataset_record])
+        mock_load_from_disk.return_value = mock_dataset
+
         result = list(data_loader.load_dataset("test_path"))
         
         assert len(result) == 1
         assert isinstance(result[0], OriginalRecord)
     
-    @patch('pyarrow.memory_map')
-    @patch('pyarrow.ipc.RecordBatchFileReader')  
-    @patch('pathlib.Path.glob')
-    def test_load_dataset_parse_error_handling(self, mock_glob: Mock, mock_reader_class: Mock, mock_memory_map: Mock, data_loader: OpenCoderDataLoader) -> None:
+    @patch('datasets.load_from_disk')
+    def test_load_dataset_parse_error_handling(self, mock_load_from_disk: Mock, data_loader: OpenCoderDataLoader) -> None:
         """測試記錄解析錯誤處理"""
-        mock_glob.return_value = [Path("test.arrow")]
-        
         # 建立有問題的記錄（缺少必要欄位）
         bad_record = {"instruction": "問題"}  # 缺少 output
         good_record = {
             "instruction": "好的問題",
-            "output": "好的回答",
+            "output": "好的回答", 
             "tag": "good"
         }
-        
-        # 模擬 PyArrow 返回混合記錄
-        mock_table = Mock()
-        mock_table.to_pylist.return_value = [bad_record, good_record]
-        
-        mock_reader = Mock()
-        mock_reader.read_all.return_value = mock_table
-        mock_reader_class.return_value = mock_reader
-        
-        mock_source = Mock()
-        mock_memory_map.return_value.__enter__.return_value = mock_source
-        
+
+        # 模擬 HuggingFace dataset
+        mock_dataset = Mock()
+        mock_dataset.__contains__ = Mock(return_value=True)  # 'train' in dataset
+        mock_dataset.__getitem__ = Mock(return_value=[bad_record, good_record])
+        mock_load_from_disk.return_value = mock_dataset
+
         with patch.object(data_loader, 'logger') as mock_logger:
             result = list(data_loader.load_dataset("test_path"))
             
@@ -254,12 +226,12 @@ class TestOpenCoderDataLoader:
             # 應該記錄警告
             mock_logger.warning.assert_called_once()
     
-    @patch('pathlib.Path.glob')
-    def test_load_dataset_load_error(self, mock_glob: Mock, data_loader: OpenCoderDataLoader) -> None:
+    @patch('datasets.load_from_disk')
+    def test_load_dataset_load_error(self, mock_load_from_disk: Mock, data_loader: OpenCoderDataLoader) -> None:
         """測試資料集載入錯誤"""
-        mock_glob.return_value = []  # 沒有找到 arrow 檔案
+        mock_load_from_disk.side_effect = FileNotFoundError("Directory test_path not found")
         
-        with pytest.raises(DataLoadError, match="No arrow files found in test_path"):
+        with pytest.raises(DataLoadError, match="Failed to load dataset from test_path"):
             list(data_loader.load_dataset("test_path"))
     
     @patch('builtins.open', new_callable=mock_open)
@@ -333,13 +305,24 @@ class TestDataLoaderIntegration:
     """資料載入器整合測試"""
     
     @pytest.mark.integration
+    @patch('datasets.load_from_disk')
     @patch('builtins.open', new_callable=mock_open)
     @patch('pathlib.Path.exists')
-    def test_end_to_end_workflow(self, mock_exists: Mock, mock_file: Mock) -> None:
+    def test_end_to_end_workflow(self, mock_exists: Mock, mock_file: Mock, mock_load_from_disk: Mock) -> None:
         """測試端到端工作流程"""
-        # 設置模擬資料
-        mock_dataset = Mock()
-        mock_dataset.__iter__ = Mock(return_value=iter([
+        dataset_info = {
+            "config_name": "test_dataset",
+            "description": "測試資料集",
+            "splits": {"train": {"num_examples": 2}},
+            "version": {"version_str": "1.0.0"}
+        }
+        
+        # 設置模擬
+        mock_exists.return_value = True
+        mock_file.return_value.read.return_value = json.dumps(dataset_info)
+        
+        # 模擬 HuggingFace dataset
+        test_records = [
             {
                 "instruction": "如何在 Python 中建立清單？",
                 "output": "使用方括號建立清單：my_list = [1, 2, 3]",
@@ -352,68 +335,36 @@ class TestDataLoaderIntegration:
                 "tag": "advanced_python", 
                 "flags": {"refusal": False, "nsfw": False}
             }
-        ]))
+        ]
         
-        dataset_info = {
-            "config_name": "test_dataset",
-            "description": "測試資料集",
-            "splits": {"train": {"num_examples": 2}},
-            "version": {"version_str": "1.0.0"}
-        }
-        
-        # 設置模擬
-        mock_exists.return_value = True
-        mock_file.return_value.read.return_value = json.dumps(dataset_info)
+        mock_dataset = Mock()
+        mock_dataset.__contains__ = Mock(return_value=True)  # 'train' in dataset
+        mock_dataset.__getitem__ = Mock(return_value=test_records)
+        mock_load_from_disk.return_value = mock_dataset
         
         # 建立載入器並測試
         loader = DataLoaderFactory.create_loader("opencoder")
         
-        # 手動設置模擬資料
-        with patch('pyarrow.memory_map'), \
-             patch('pyarrow.ipc.RecordBatchFileReader') as mock_reader, \
-             patch('pathlib.Path.glob', return_value=[Path("test.arrow")]):
-            
-            # 設置 PyArrow 模擬
-            mock_table = Mock()
-            mock_table.to_pylist.return_value = [
-                {
-                    "instruction": "如何在 Python 中建立清單？",
-                    "output": "使用方括號建立清單：my_list = [1, 2, 3]",
-                    "tag": "basic_python",
-                    "flags": {"refusal": False, "nsfw": False}
-                },
-                {
-                    "instruction": "解釋 Python 裝飾器",
-                    "output": "裝飾器是修改函數行為的語法糖",
-                    "tag": "advanced_python", 
-                    "flags": {"refusal": False, "nsfw": False}
-                }
-            ]
-            
-            mock_file_reader = Mock()
-            mock_file_reader.read_all.return_value = mock_table
-            mock_reader.return_value = mock_file_reader
-            
-            # 測試元資料
-            metadata = loader.get_metadata("test_path")
-            assert metadata.name == "test_dataset"
-            assert metadata.total_records == 2
-            
-            # 測試資料載入
-            records = list(loader.load_dataset("test_path"))
-            assert len(records) == 2
-            
-            # 驗證第一筆記錄
-            record1 = records[0]
-            assert record1.question == "如何在 Python 中建立清單？"
-            assert record1.answer == "使用方括號建立清單：my_list = [1, 2, 3]"
-            assert record1.complexity_level == ComplexityLevel.SIMPLE
-            
-            # 驗證第二筆記錄
-            record2 = records[1]
-            assert record2.question == "解釋 Python 裝飾器"
-            assert record2.answer == "裝飾器是修改函數行為的語法糖"
-            assert record2.complexity_level == ComplexityLevel.COMPLEX
+        # 測試元資料
+        metadata = loader.get_metadata("test_path")
+        assert metadata.name == "test_dataset"
+        assert metadata.total_records == 2
+        
+        # 測試資料載入
+        records = list(loader.load_dataset("test_path"))
+        assert len(records) == 2
+        
+        # 驗證第一筆記錄
+        record1 = records[0]
+        assert record1.question == "如何在 Python 中建立清單？"
+        assert record1.answer == "使用方括號建立清單：my_list = [1, 2, 3]"
+        assert record1.complexity_level == ComplexityLevel.SIMPLE
+        
+        # 驗證第二筆記錄
+        record2 = records[1]
+        assert record2.question == "解釋 Python 裝飾器"
+        assert record2.answer == "裝飾器是修改函數行為的語法糖"
+        assert record2.complexity_level == ComplexityLevel.COMPLEX
     
     @pytest.mark.integration
     def test_abstract_interface_compliance(self) -> None:
@@ -435,10 +386,11 @@ class TestDataLoaderPerformance:
     """資料載入器效能測試"""
     
     @pytest.mark.performance
-    def test_large_dataset_loading_performance(self) -> None:
+    @patch('datasets.load_from_disk')
+    def test_large_dataset_loading_performance(self, mock_load_from_disk: Mock) -> None:
         """測試大型資料集載入效能"""
         import time
-        
+
         # 建立大量模擬記錄
         large_dataset = [
             {
@@ -450,26 +402,17 @@ class TestDataLoaderPerformance:
             for i in range(1000)  # 減少數量避免測試過慢
         ]
         
+        # 模擬 HuggingFace dataset
         mock_dataset = Mock()
-        mock_dataset.__iter__ = Mock(return_value=iter(large_dataset))
-        
+        mock_dataset.__contains__ = Mock(return_value=True)  # 'train' in dataset
+        mock_dataset.__getitem__ = Mock(return_value=large_dataset)
+        mock_load_from_disk.return_value = mock_dataset
+
         loader = OpenCoderDataLoader()
-        
+
         # 效能測試
         start_time = time.time()
-        with patch('pyarrow.memory_map'), \
-             patch('pyarrow.ipc.RecordBatchFileReader') as mock_reader, \
-             patch('pathlib.Path.glob', return_value=[Path("test.arrow")]):
-            
-            # 設置 PyArrow 模擬
-            mock_table = Mock()
-            mock_table.to_pylist.return_value = large_dataset
-            
-            mock_file_reader = Mock()
-            mock_file_reader.read_all.return_value = mock_table
-            mock_reader.return_value = mock_file_reader
-            
-            result = list(loader.load_dataset("test_path"))
+        result = list(loader.load_dataset("test_path"))
         end_time = time.time()
         
         assert len(result) == 1000

@@ -626,7 +626,12 @@ class TestConfigurationIntegration:
         formatters = config["formatters"]
         for format_name in formatters.keys():
             assert format_name in LOG_FORMATS
-            assert formatters[format_name] == LOG_FORMATS[format_name]
+            # 驗證轉換後的格式器配置
+            converted_config = formatters[format_name]
+            original_config = LOG_FORMATS[format_name]
+            assert converted_config["format"] == original_config["format_string"]
+            assert converted_config["datefmt"] == original_config["date_format"]
+            assert converted_config["style"] == original_config["style"]
         
         # 檢查所有處理器是否有對應的格式器
         handlers = config["handlers"]

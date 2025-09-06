@@ -185,6 +185,32 @@ class TestWorkflowManager:
 class TestWorkflowManagerIntegration:
     """工作流管理器整合測試"""
 
+    def create_test_original_record(self, record_id: str = "test_id") -> OriginalRecord:
+        """創建測試用原始記錄"""
+        return OriginalRecord(
+            id=record_id,
+            question="Test question",
+            answer="Test answer",
+            source_dataset="test_dataset",
+            metadata={"tag": "test", "source_index": 0},
+            complexity_level=ComplexityLevel.SIMPLE
+        )
+
+    def create_test_workflow_state(self, record_id: str = "test_id") -> Dict[str, Any]:
+        """創建測試用工作流狀態"""
+        original_record = self.create_test_original_record(record_id)
+        return {
+            'current_record': original_record,
+            'translation_result': None,
+            'original_qa_result': None,
+            'translated_qa_result': None,
+            'quality_assessment': None,
+            'retry_count': 0,
+            'processing_status': ProcessingStatus.PENDING,
+            'error_history': [],
+            'improvement_suggestions': []
+        }
+
     @pytest.mark.integration
     def test_full_workflow_integration(self) -> None:
         """測試完整工作流整合"""
@@ -226,3 +252,102 @@ class TestWorkflowManagerIntegration:
             assert isinstance(result, dict)
             assert result['processing_status'] == ProcessingStatus.COMPLETED
             mock_invoke.assert_called_once()
+
+    def test_route_after_evaluation_retry_needed(self) -> None:
+        """測試評估後路由 - 需要重試的情況"""
+        from src.workflow.graph import route_after_evaluation
+        
+        # 創建正確的狀態字典，其中current_record是一個簡單的字典
+        state = {
+            'current_record': {'id': 'retry_test'},
+            'processing_status': ProcessingStatus.RETRY_NEEDED
+        }
+        
+        result = route_after_evaluation(state)
+        assert result == "analyzer_designer"
+
+    def test_route_after_evaluation_completed(self) -> None:
+        """測試評估後路由 - 完成的情況"""
+        from src.workflow.graph import route_after_evaluation
+        
+        state = {
+            'current_record': {'id': 'complete_test'},
+            'processing_status': ProcessingStatus.COMPLETED
+        }
+        
+        result = route_after_evaluation(state)
+        assert result == "end"
+
+    def test_route_after_evaluation_error_handling(self) -> None:
+        """測試評估後路由 - 錯誤處理"""
+        from src.workflow.graph import route_after_evaluation
+        
+        # 測試異常狀態
+        invalid_state = None
+        result = route_after_evaluation(invalid_state)
+        assert result == "end"
+        
+        # 測試缺少必要字段的狀態
+        incomplete_state = {}
+        result = route_after_evaluation(incomplete_state)
+        assert result == "end"
+
+    def test_stream_processing_with_config_and_checkpointing(self) -> None:
+        """測試帶配置和檢查點的流式處理"""
+        workflow_manager = WorkflowManager(enable_checkpointing=True)
+        initial_state = self.create_test_workflow_state("checkpoint_record")
+        config = {"max_retries": 3}
+        
+        mock_stream_data = [{"node": "analyzer_designer", "state": initial_state}]
+        
+        with patch.object(workflow_manager.workflow, 'stream') as mock_stream:
+            mock_stream.return_value = iter(mock_stream_data)
+            
+            stream_results = list(workflow_manager.stream_record_processing(initial_state, config))
+            
+            # 驗證配置被傳遞
+            mock_stream.assert_called_once_with(initial_state, config=config)
+            assert len(stream_results) == len(mock_stream_data)
+
+    def test_stream_processing_without_config(self) -> None:
+        """測試無配置的流式處理"""
+        workflow_manager = WorkflowManager(enable_checkpointing=False)
+        initial_state = self.create_test_workflow_state("no_config_record")
+        
+        mock_stream_data = [{"node": "evaluator", "state": initial_state}]
+        
+        with patch.object(workflow_manager.workflow, 'stream') as mock_stream:
+            mock_stream.return_value = iter(mock_stream_data)
+            
+            stream_results = list(workflow_manager.stream_record_processing(initial_state))
+            
+            # 驗證沒有配置參數被傳遞
+            mock_stream.assert_called_once_with(initial_state)
+            assert len(stream_results) == len(mock_stream_data)
+
+    def test_stream_processing_exception_handling(self) -> None:
+        """測試流式處理異常處理"""
+        workflow_manager = WorkflowManager(enable_checkpointing=False)
+        initial_state = self.create_test_workflow_state("exception_record")
+        
+        with patch.object(workflow_manager.workflow, 'stream') as mock_stream:
+            mock_stream.side_effect = Exception("Stream processing error")
+            
+            stream_results = list(workflow_manager.stream_record_processing(initial_state))
+            
+            # 驗證錯誤被正確處理
+            assert len(stream_results) == 1
+            assert "error" in stream_results[0]
+            assert "Stream processing error" in stream_results[0]["error"]
+
+    def test_workflow_graph_visualization_exception_handling(self) -> None:
+        """測試工作流圖形可視化異常處理"""
+        workflow_manager = WorkflowManager(enable_checkpointing=False)
+        
+        with patch.object(workflow_manager.workflow, 'get_graph') as mock_get_graph:
+            mock_get_graph.side_effect = Exception("Visualization error")
+            
+            result = workflow_manager.get_workflow_graph_visualization()
+            
+            # 驗證異常被正確處理，返回空字節
+            assert result == b""

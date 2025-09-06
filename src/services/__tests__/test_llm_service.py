@@ -36,8 +36,9 @@ def mock_chat_model() -> Mock:
 @pytest.fixture
 def llm_service(mock_chat_model: Mock) -> LLMService:
     """創建測試用 LLMService"""
-    with patch('src.services.llm_service.LLMService._create_real_client') as mock_create:
-        mock_create.return_value = mock_chat_model
+    with patch('src.services.llm_service.init_chat_model') as mock_init, \
+         patch.object(LLMService, '_check_api_key', return_value=True):
+        mock_init.return_value = mock_chat_model
         service = LLMService(
             provider=LLMProvider.OPENAI,
             model=LLMModel.GPT_4O
@@ -50,8 +51,9 @@ class TestLLMService:
 
     def test_init(self) -> None:
         """測試初始化"""
-        with patch('src.services.llm_service.LLMService._create_real_client') as mock_create:
-            mock_create.return_value = Mock()
+        with patch('src.services.llm_service.init_chat_model') as mock_init, \
+             patch.object(LLMService, '_check_api_key', return_value=True):
+            mock_init.return_value = Mock()
             service = LLMService(
                 provider=LLMProvider.OPENAI,
                 model=LLMModel.GPT_4O
@@ -208,8 +210,9 @@ class TestLLMFactory:
 
     def test_create_openai_service(self) -> None:
         """測試創建 OpenAI 服務"""
-        with patch('src.services.llm_service.LLMService._create_real_client') as mock_create:
-            mock_create.return_value = Mock()
+        with patch('src.services.llm_service.init_chat_model') as mock_init, \
+             patch.object(LLMService, '_check_api_key', return_value=True):
+            mock_init.return_value = Mock()
             service = LLMFactory.create_llm(
                 provider=LLMProvider.OPENAI,
                 model=LLMModel.GPT_4O
@@ -221,8 +224,9 @@ class TestLLMFactory:
 
     def test_create_anthropic_service(self) -> None:
         """測試創建 Anthropic 服務"""
-        with patch('src.services.llm_service.LLMService._create_real_client') as mock_create:
-            mock_create.return_value = Mock()
+        with patch('src.services.llm_service.init_chat_model') as mock_init, \
+             patch.object(LLMService, '_check_api_key', return_value=True):
+            mock_init.return_value = Mock()
             service = LLMFactory.create_llm(
                 provider=LLMProvider.ANTHROPIC,
                 model=LLMModel.CLAUDE_4_SONNET
@@ -234,8 +238,9 @@ class TestLLMFactory:
 
     def test_create_google_service(self) -> None:
         """測試創建 Google 服務"""
-        with patch('src.services.llm_service.LLMService._create_real_client') as mock_create:
-            mock_create.return_value = Mock()
+        with patch('src.services.llm_service.init_chat_model') as mock_init, \
+             patch.object(LLMService, '_check_api_key', return_value=True):
+            mock_init.return_value = Mock()
             service = LLMFactory.create_llm(
                 provider=LLMProvider.GOOGLE,
                 model=LLMModel.GEMINI_2_5_FLASH
@@ -247,8 +252,9 @@ class TestLLMFactory:
 
     def test_create_ollama_service(self) -> None:
         """測試創建 Ollama 服務"""
-        with patch('src.services.llm_service.LLMService._create_real_client') as mock_create:
-            mock_create.return_value = Mock()
+        with patch('src.services.llm_service.init_chat_model') as mock_init, \
+             patch.object(LLMService, '_check_api_key', return_value=True):
+            mock_init.return_value = Mock()
             service = LLMFactory.create_llm(
                 provider=LLMProvider.OLLAMA,
                 model=LLMModel.LLAMA3_1
@@ -261,10 +267,11 @@ class TestLLMFactory:
     @pytest.mark.integration
     def test_create_and_invoke_integration(self) -> None:
         """測試創建服務並調用的整合測試"""
-        with patch('src.services.llm_service.LLMService._create_real_client') as mock_create:
+        with patch('src.services.llm_service.init_chat_model') as mock_init, \
+             patch.object(LLMService, '_check_api_key', return_value=True):
             mock_client = Mock()
             mock_client.invoke.return_value = AIMessage(content="整合測試回應")
-            mock_create.return_value = mock_client
+            mock_init.return_value = mock_client
             
             service = LLMFactory.create_llm(
                 provider=LLMProvider.OPENAI,

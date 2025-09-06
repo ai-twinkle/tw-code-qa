@@ -1,23 +1,19 @@
 """
-LLM 服務模組 - 簡化版
-LLM Service Module - Simplified using LangGraph Factory
+LLM 服務模組 - 使用 LangChain init_chat_model
+LLM Service Module - Using LangChain init_chat_model
 
-使用 LangGraph 內建工廠提供統一的 LLM 介面
+使用 LangChain 最新的 init_chat_model 方法提供統一的 LLM 介面
 """
 
+import os
 import time
 from dataclasses import dataclass
-from typing import List, Dict, Union, Protocol
+from typing import List, Dict, Union
 
+from langchain.chat_models import init_chat_model
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 
 from ..constants.llm import LLMModel, LLMProvider
-
-
-class ChatModelProtocol(Protocol):
-    """聊天模型協議"""
-    def invoke(self, messages: List[BaseMessage]) -> BaseMessage: ...
-    async def ainvoke(self, messages: List[BaseMessage]) -> BaseMessage: ...
 
 
 @dataclass
@@ -31,23 +27,69 @@ class LLMResponse:
 
 
 class LLMService:
-    """LLM 服務類別 - 使用 LangGraph 內建工廠"""
+    """LLM 服務類別 - 使用 LangChain init_chat_model"""
     
     def __init__(self, provider: LLMProvider, model: LLMModel):
         self.provider = provider
         self.model = model
         self._client = self._initialize_client()
     
-    def _initialize_client(self) -> ChatModelProtocol:
-        """初始化 LLM 客戶端"""
-        # 實際專案中應該使用真實的 LangChain 客戶端
-        # 這裡提供一個可以被測試 mock 的版本
-        return self._create_real_client()
+    def _initialize_client(self):
+        """初始化 LLM 客戶端 - 使用 init_chat_model"""
+        try:
+            # 檢查 API 密鑰是否設置
+            if not self._check_api_key():
+                print(f"Warning: No API key found for {self.provider.value}. Using mock client for development.")
+                return self._create_mock_client()
+            
+            # 構建模型標識符，根據 provider 決定格式
+            model_identifier = self._get_model_identifier()
+            
+            # 使用 init_chat_model 初始化客戶端
+            client = init_chat_model(
+                model=model_identifier,
+                temperature=0.7,  # 預設溫度
+                max_tokens=None,  # 預設不限制
+                timeout=30,       # 30 秒超時
+                max_retries=3     # 最多重試 3 次
+            )
+            
+            return client
+            
+        except Exception as e:
+            print(f"Warning: Failed to initialize real LLM client ({e}). Using mock client for development.")
+            return self._create_mock_client()
+    
+    def _get_model_identifier(self) -> str:
+        """根據提供者和模型構建模型標識符"""
+        if self.provider == LLMProvider.OPENAI:
+            return f"{self.model.value}"  # OpenAI 直接使用模型名稱
+        elif self.provider == LLMProvider.ANTHROPIC:
+            return f"anthropic:{self.model.value}"
+        elif self.provider == LLMProvider.GOOGLE:
+            return f"google_genai:{self.model.value}"
+        elif self.provider == LLMProvider.OLLAMA:
+            return f"ollama:{self.model.value}"
+        else:
+            # 預設直接使用模型名稱
+            return self.model.value
+    
+    def _check_api_key(self) -> bool:
+        """檢查對應提供者的 API 密鑰是否設置"""
+        if self.provider == LLMProvider.OPENAI:
+            return bool(os.getenv("OPENAI_API_KEY"))
+        elif self.provider == LLMProvider.ANTHROPIC:
+            return bool(os.getenv("ANTHROPIC_API_KEY"))
+        elif self.provider == LLMProvider.GOOGLE:
+            return bool(os.getenv("GOOGLE_API_KEY"))
+        elif self.provider == LLMProvider.OLLAMA:
+            # Ollama 通常不需要 API key，但需要確認服務可用
+            return True
+        return False
 
     @staticmethod
-    def _create_real_client() -> ChatModelProtocol:
-        """建立真實的 LLM 客戶端"""
-        # 為了型別安全，我們需要返回符合協議的物件
+    def _create_mock_client():
+        """建立 Mock 客戶端 - 用於開發和測試"""
         class MockChatModel:
             @staticmethod
             def invoke(messages: List[BaseMessage]) -> BaseMessage:

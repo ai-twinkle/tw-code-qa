@@ -24,6 +24,20 @@ This project is a system for converting and processing Traditional Chinese Code-
    uv sync --extra dev
    ```
 
+3. Set up environment variables:
+   ```bash
+   cp .env.example .env
+   ```
+   
+   Then edit `.env` file with your actual API keys:
+   ```env
+   OPENAI_API_KEY=your_openai_api_key_here
+   ANTHROPIC_API_KEY=your_anthropic_api_key_here
+   GOOGLE_API_KEY=your_google_api_key_here
+   ```
+   
+   **Important**: API keys are required in production mode (default). For development mode, you can run without API keys using `--environment development`.
+
 ## Usage
 
 First, download the dataset:

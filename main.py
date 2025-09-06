@@ -10,6 +10,8 @@ import logging
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from src.config.logging_config import setup_logging
 from src.config.settings import set_environment
 from src.core.dataset_manager import DatasetManager
@@ -77,9 +79,9 @@ def setup_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         '--environment',
         type=str,
-        default='development',
+        default='production',
         choices=['development', 'testing', 'staging', 'production'],
-        help='執行環境 (預設: development)'
+        help='執行環境 (預設: production)'
     )
     
     parser.add_argument(
@@ -202,6 +204,9 @@ def run_dataset_conversion(args: argparse.Namespace) -> None:
 def main() -> None:
     """主程式入口"""
     try:
+        # 載入環境變數
+        load_dotenv()
+        
         # 解析命令列參數
         parser = setup_argument_parser()
         args = parser.parse_args()

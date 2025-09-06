@@ -14,6 +14,12 @@ from langchain.chat_models import init_chat_model
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 
 from ..constants.llm import LLMModel, LLMProvider
+from ..config.settings import is_production
+
+
+class MissingAPIKeyError(Exception):
+    """在生產環境中缺少必要的 API 密鑰時拋出的錯誤"""
+    pass
 
 
 @dataclass
@@ -39,8 +45,20 @@ class LLMService:
         try:
             # 檢查 API 密鑰是否設置
             if not self._check_api_key():
-                print(f"Warning: No API key found for {self.provider.value}. Using mock client for development.")
-                return self._create_mock_client()
+                if is_production():
+                    # 在生產環境中，缺少 API 密鑰時拋出錯誤
+                    missing_key = self._get_required_api_key_name()
+                    raise MissingAPIKeyError(
+                        f"在生產環境中必須配置 {missing_key}。\n"
+                        f"請執行以下步驟:\n"
+                        f"1. 複製 .env.example 到 .env: cp .env.example .env\n"
+                        f"2. 在 .env 文件中設置: {missing_key}=your_actual_api_key\n"
+                        f"3. 確保 .env 文件在專案根目錄中\n"
+                        f"4. 重新執行程式"
+                    )
+                else:
+                    print(f"Warning: No API key found for {self.provider.value}. Using mock client for development.")
+                    return self._create_mock_client()
             
             # 構建模型標識符，根據 provider 決定格式
             model_identifier = self._get_model_identifier()
@@ -56,9 +74,21 @@ class LLMService:
             
             return client
             
+        except MissingAPIKeyError:
+            # 重新拋出 API 密鑰錯誤
+            raise
         except Exception as e:
-            print(f"Warning: Failed to initialize real LLM client ({e}). Using mock client for development.")
-            return self._create_mock_client()
+            if is_production():
+                # 在生產環境中，初始化失敗時拋出詳細錯誤
+                raise RuntimeError(
+                    f"LLM 客戶端初始化失敗: {e}\n"
+                    f"提供者: {self.provider.value}\n"
+                    f"模型: {self.model.value}\n"
+                    f"請檢查 API 密鑰是否正確設置，並確保網路連接正常。"
+                )
+            else:
+                print(f"Warning: Failed to initialize real LLM client ({e}). Using mock client for development.")
+                return self._create_mock_client()
     
     def _get_model_identifier(self) -> str:
         """根據提供者和模型構建模型標識符"""
@@ -86,6 +116,19 @@ class LLMService:
             # Ollama 通常不需要 API key，但需要確認服務可用
             return True
         return False
+
+    def _get_required_api_key_name(self) -> str:
+        """取得對應提供者所需的 API 密鑰名稱"""
+        if self.provider == LLMProvider.OPENAI:
+            return "OPENAI_API_KEY"
+        elif self.provider == LLMProvider.ANTHROPIC:
+            return "ANTHROPIC_API_KEY"
+        elif self.provider == LLMProvider.GOOGLE:
+            return "GOOGLE_API_KEY"
+        elif self.provider == LLMProvider.OLLAMA:
+            return "OLLAMA_HOST (可選)"
+        else:
+            return f"{self.provider.value.upper()}_API_KEY"
 
     @staticmethod
     def _create_mock_client():
@@ -198,6 +241,7 @@ class LLMFactory:
 
 
 __all__ = [
+    "MissingAPIKeyError",
     "LLMResponse", 
     "LLMService",
     "LLMFactory",

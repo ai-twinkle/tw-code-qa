@@ -359,7 +359,7 @@ DATA_PROCESSING_CONFIGS: DataProcessingConfig = {
 }
 
 # 當前環境設定 (透過配置文件設定，而非環境變數)
-CURRENT_ENVIRONMENT = Environment.DEVELOPMENT.value
+CURRENT_ENVIRONMENT = Environment.PRODUCTION.value
 
 def get_environment() -> str:
     """取得當前環境"""

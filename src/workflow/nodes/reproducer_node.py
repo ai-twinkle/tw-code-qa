@@ -16,7 +16,7 @@ import logging
 import time
 from typing import List
 
-from ..state import WorkflowState, update_state_safely
+from ..state import WorkflowState, update_state_safely, StateUpdateValue
 from ...config.llm_config import get_agent_config
 from ...constants.llm import LLMProvider, LLMModel
 from ...models.dataset import QAExecutionResult, Language, ProcessingStatus
@@ -258,7 +258,7 @@ def reproducer_node(state: WorkflowState) -> WorkflowState:
         )
         
         # 更新狀態
-        updates = {
+        updates: StateUpdateValue = {
             "original_qa_result": original_qa_result,
             "translated_qa_result": translated_qa_result
         }

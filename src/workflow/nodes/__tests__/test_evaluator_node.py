@@ -279,6 +279,10 @@ class TestEvaluatorAgent:
         mock_get_config.return_value = mock_agent_config
         mock_create_llm.return_value = mock_llm_service
         
+        # Mock LLM response to return expected score
+        from langchain_core.messages import AIMessage
+        mock_llm_service.invoke.return_value = AIMessage(content="8.0")
+        
         agent = EvaluatorAgent()
         
         original = "Here's the code:\n```python\nprint('hello')\n```"
@@ -295,6 +299,10 @@ class TestEvaluatorAgent:
         """測試程式碼完整性評估 - 沒有程式碼"""
         mock_get_config.return_value = mock_agent_config
         mock_create_llm.return_value = mock_llm_service
+        
+        # Mock LLM response to return expected score
+        from langchain_core.messages import AIMessage
+        mock_llm_service.invoke.return_value = AIMessage(content="10.0")
         
         agent = EvaluatorAgent()
         
@@ -313,6 +321,10 @@ class TestEvaluatorAgent:
         mock_get_config.return_value = mock_agent_config
         mock_create_llm.return_value = mock_llm_service
         
+        # Mock LLM response to return expected score
+        from langchain_core.messages import AIMessage
+        mock_llm_service.invoke.return_value = AIMessage(content="5.0")
+        
         agent = EvaluatorAgent()
         
         original = "Code: ```python\nprint('hello')\n```"
@@ -329,6 +341,9 @@ class TestEvaluatorAgent:
         """測試程式碼完整性評估 - 異常處理"""
         mock_get_config.return_value = mock_agent_config
         mock_create_llm.return_value = mock_llm_service
+        
+        # Mock the LLM service to raise an exception
+        mock_llm_service.invoke.side_effect = Exception("Mock LLM error")
         
         agent = EvaluatorAgent()
         
@@ -377,8 +392,25 @@ class TestEvaluatorAgent:
         
         assert score == 7.0  # 異常時預設分數
     
-    def test_generate_improvement_suggestions_low_semantic(self, sample_qa_results):
+    @patch('src.config.llm_config.get_agent_config')
+    @patch('src.services.llm_service.LLMFactory.create_llm')
+    def test_generate_improvement_suggestions_low_semantic(self, mock_create_llm, mock_get_config, 
+                                                          mock_agent_config, mock_llm_service, sample_qa_results):
         """測試生成改進建議 - 低語義一致性分數"""
+        mock_get_config.return_value = mock_agent_config
+        mock_create_llm.return_value = mock_llm_service
+        
+        # Mock LLM response to return suggestions
+        from langchain_core.messages import AIMessage
+        mock_llm_service.invoke.return_value = AIMessage(content="""
+        - 改善語義一致性：確保翻譯保持原文的核心技術意圖
+        - 檢查技術術語翻譯的準確性
+        - 確保邏輯結構保持一致
+        - 提升技術概念的表達清晰度
+        """)
+        
+        agent = EvaluatorAgent()
+        
         original_qa, translated_qa = sample_qa_results
         quality_scores = {
             "semantic_consistency": 6.0,
@@ -386,15 +418,31 @@ class TestEvaluatorAgent:
             "translation_naturalness": 9.0
         }
         
-        suggestions = EvaluatorAgent.generate_improvement_suggestions(
+        suggestions = agent.generate_improvement_suggestions(
             original_qa, translated_qa, quality_scores
         )
         
         assert len(suggestions) == 4  # 實際建議數量
         assert any("語義一致性" in suggestion for suggestion in suggestions)
     
-    def test_generate_improvement_suggestions_low_code_integrity(self, sample_qa_results):
+    @patch('src.config.llm_config.get_agent_config')
+    @patch('src.services.llm_service.LLMFactory.create_llm')
+    def test_generate_improvement_suggestions_low_code_integrity(self, mock_create_llm, mock_get_config, 
+                                                               mock_agent_config, mock_llm_service, sample_qa_results):
         """測試生成改進建議 - 低程式碼完整性分數"""
+        mock_get_config.return_value = mock_agent_config
+        mock_create_llm.return_value = mock_llm_service
+        
+        # Mock LLM response to return suggestions
+        from langchain_core.messages import AIMessage
+        mock_llm_service.invoke.return_value = AIMessage(content="""
+        - 保護程式碼完整性：確保程式碼區塊不被誤譯或遺失
+        - 檢查程式碼格式的一致性
+        - 確保程式語法結構保持正確
+        """)
+        
+        agent = EvaluatorAgent()
+        
         original_qa, translated_qa = sample_qa_results
         quality_scores = {
             "semantic_consistency": 9.0,
@@ -402,14 +450,30 @@ class TestEvaluatorAgent:
             "translation_naturalness": 9.0
         }
         
-        suggestions = EvaluatorAgent.generate_improvement_suggestions(
+        suggestions = agent.generate_improvement_suggestions(
             original_qa, translated_qa, quality_scores
         )
         
         assert any("程式碼完整性" in suggestion for suggestion in suggestions)
     
-    def test_generate_improvement_suggestions_low_naturalness(self, sample_qa_results):
+    @patch('src.config.llm_config.get_agent_config')
+    @patch('src.services.llm_service.LLMFactory.create_llm')
+    def test_generate_improvement_suggestions_low_naturalness(self, mock_create_llm, mock_get_config, 
+                                                            mock_agent_config, mock_llm_service, sample_qa_results):
         """測試生成改進建議 - 低翻譯自然度分數"""
+        mock_get_config.return_value = mock_agent_config
+        mock_create_llm.return_value = mock_llm_service
+        
+        # Mock LLM response to return suggestions
+        from langchain_core.messages import AIMessage
+        mock_llm_service.invoke.return_value = AIMessage(content="""
+        - 提升翻譯自然度：使用更符合繁體中文習慣的表達方式
+        - 改善語言流暢性
+        - 優化術語使用
+        """)
+        
+        agent = EvaluatorAgent()
+        
         original_qa, translated_qa = sample_qa_results
         quality_scores = {
             "semantic_consistency": 9.0,
@@ -417,7 +481,7 @@ class TestEvaluatorAgent:
             "translation_naturalness": 6.0
         }
         
-        suggestions = EvaluatorAgent.generate_improvement_suggestions(
+        suggestions = agent.generate_improvement_suggestions(
             original_qa, translated_qa, quality_scores
         )
         

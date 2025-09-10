@@ -3,7 +3,10 @@ LLM service configurations
 LLM 服務配置
 """
 
+import json
+import os
 from enum import Enum
+from pathlib import Path
 from typing import Dict, Optional
 
 from typing_extensions import TypedDict
@@ -237,8 +240,47 @@ def get_model_config(model_name: str) -> Optional[ModelConfig]:
     return DEFAULT_LLM_CONFIGS.get(model_name)
 
 
+def _load_agent_models_from_json() -> Dict[str, AgentModelConfig]:
+    """從 agent_models.json 檔案載入 Agent 模型配置"""
+    try:
+        # 取得 agent_models.json 檔案路徑
+        config_dir = Path(__file__).parent
+        agent_models_file = config_dir / "agent_models.json"
+        
+        if not agent_models_file.exists():
+            print(f"Warning: agent_models.json not found at {agent_models_file}")
+            return {}
+            
+        with open(agent_models_file, 'r', encoding='utf-8') as f:
+            agent_models_data = json.load(f)
+        
+        # 轉換 JSON 格式到 AgentModelConfig 格式
+        agent_configs = {}
+        for agent_name, agent_data in agent_models_data.get("agents", {}).items():
+            agent_configs[agent_name] = {
+                "primary_model": agent_data.get("primary_model", "gpt-4o"),
+                "fallback_model": agent_data.get("fallback_models", [None])[0] if agent_data.get("fallback_models") else None,
+                "temperature": agent_data.get("model_parameters", {}).get("temperature", 0.1),
+                "max_tokens": agent_data.get("model_parameters", {}).get("max_tokens", 4096),
+                "custom_prompt_template": None,
+            }
+        
+        print(f"Loaded agent configurations from agent_models.json: {list(agent_configs.keys())}")
+        return agent_configs
+        
+    except Exception as e:
+        print(f"Error loading agent_models.json: {e}")
+        return {}
+
+
 def get_agent_config(agent_name: str) -> Optional[AgentModelConfig]:
     """取得指定 Agent 的模型配置"""
+    # 首先嘗試從 JSON 檔案載入
+    json_configs = _load_agent_models_from_json()
+    if json_configs and agent_name in json_configs:
+        return json_configs[agent_name]
+    
+    # 如果 JSON 檔案無法載入或不包含該 Agent，則使用預設配置
     return AGENT_MODEL_CONFIGS.get(agent_name)
 
 
@@ -254,11 +296,11 @@ def calculate_cost(model_name: str, input_tokens: int, output_tokens: int) -> fl
     return input_cost + output_cost
 
 
-def get_llm_config(model_name: str = "gpt-4") -> ModelConfig:
+def get_llm_config(model_name: str = "gpt-4o") -> ModelConfig:
     """取得 LLM 配置
     
     Args:
-        model_name: 模型名稱，預設為 gpt-4
+        model_name: 模型名稱，預設為 gpt-4o
         
     Returns:
         ModelConfig: LLM 配置
@@ -266,7 +308,7 @@ def get_llm_config(model_name: str = "gpt-4") -> ModelConfig:
     config = get_model_config(model_name)
     if config is None:
         # 返回預設配置
-        return DEFAULT_LLM_CONFIGS["gpt-4"]
+        return DEFAULT_LLM_CONFIGS["gpt-4o"]
     return config
 
 

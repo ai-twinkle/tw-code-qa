@@ -66,9 +66,12 @@ class AnalyzerDesignerAgent:
             elif "gemini" in self.primary_model:
                 provider = LLMProvider.GOOGLE
             else:
-                provider = LLMProvider.OPENAI  # 預設
+                provider = LLMProvider.OLLAMA  # 否則使用 Ollama
                 
             model_enum = LLMModel(self.primary_model)
+            
+            logger.info(f"Initializing AnalyzerDesignerAgent with {provider.value} - {model_enum.value}")
+            
             return LLMFactory.create_llm(provider, model_enum)
             
         except Exception as e:

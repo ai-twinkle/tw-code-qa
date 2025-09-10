@@ -8,6 +8,7 @@ LLM 配置測試模組
 import sys
 from pathlib import Path
 from typing import Dict, Optional
+from unittest.mock import patch
 
 import pytest
 
@@ -320,25 +321,31 @@ class TestConfigurationFunctions:
 
     def test_get_agent_config_existing(self) -> None:
         """測試取得存在的 Agent 配置"""
-        # 如果有 Agent 配置，測試第一個
-        if AGENT_MODEL_CONFIGS:
-            agent_name = list(AGENT_MODEL_CONFIGS.keys())[0]
-            config = get_agent_config(agent_name)
-            assert config is not None
-            assert isinstance(config, dict)
-            assert config == AGENT_MODEL_CONFIGS[agent_name]
+        # Mock JSON loading to return empty dict to test fallback to hardcoded configs
+        with patch('src.config.llm_config._load_agent_models_from_json', return_value={}):
+            # 如果有 Agent 配置，測試第一個
+            if AGENT_MODEL_CONFIGS:
+                agent_name = list(AGENT_MODEL_CONFIGS.keys())[0]
+                config = get_agent_config(agent_name)
+                assert config is not None
+                assert isinstance(config, dict)
+                assert config == AGENT_MODEL_CONFIGS[agent_name]
 
     def test_get_agent_config_non_existing(self) -> None:
         """測試取得不存在的 Agent 配置"""
-        config = get_agent_config("non_existent_agent")
-        assert config is None
+        # Mock JSON loading to return empty dict to test fallback to hardcoded configs
+        with patch('src.config.llm_config._load_agent_models_from_json', return_value={}):
+            config = get_agent_config("non_existent_agent")
+            assert config is None
 
     def test_get_agent_config_all_default_agents(self) -> None:
         """測試取得所有預設 Agent 配置"""
-        for agent_name in AGENT_MODEL_CONFIGS.keys():
-            config = get_agent_config(agent_name)
-            assert config is not None
-            assert config == AGENT_MODEL_CONFIGS[agent_name]
+        # Mock JSON loading to return empty dict to test fallback to hardcoded configs
+        with patch('src.config.llm_config._load_agent_models_from_json', return_value={}):
+            for agent_name in AGENT_MODEL_CONFIGS.keys():
+                config = get_agent_config(agent_name)
+                assert config is not None
+                assert config == AGENT_MODEL_CONFIGS[agent_name]
 
 
 class TestCostCalculation:

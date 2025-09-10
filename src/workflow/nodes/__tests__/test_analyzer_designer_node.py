@@ -102,12 +102,12 @@ class TestAnalyzerDesignerAgent:
     def test_init(self):
         """測試 AnalyzerDesignerAgent 初始化"""
         with patch('src.config.llm_config.get_agent_config') as mock_get_config:
-            # Mock the config to return valid data
+            # Mock the config to return valid data matching agent_models.json
             mock_get_config.return_value = {
                 "primary_model": "gpt-4o",
-                "fallback_model": "claude-4-sonnet", 
+                "fallback_model": "gpt-4.1", 
                 "temperature": 0.1,
-                "max_tokens": 8192
+                "max_tokens": 4096  # Updated to match agent_models.json
             }
             
             with patch('src.services.llm_service.LLMFactory.create_llm') as mock_create_llm:
@@ -118,8 +118,8 @@ class TestAnalyzerDesignerAgent:
                 # Verify the agent is initialized with correct config values
                 assert agent.primary_model == "gpt-4o"
                 assert agent.temperature == 0.1
-                assert agent.max_tokens == 8192
-                assert agent.fallback_model == "claude-4-sonnet"
+                assert agent.max_tokens == 4096  # Updated to match agent_models.json
+                assert agent.fallback_model == "gpt-4.1"  # Updated to match agent_models.json
                 assert agent.llm_service is not None
     
     @patch.object(analyzer_designer_module, 'get_agent_config')

@@ -100,7 +100,7 @@ class TestReproducerAgent:
         # Verify the agent is initialized with correct config values
         assert agent.primary_model == "claude-4-sonnet"
         assert agent.temperature == 0.0
-        assert agent.max_tokens == 4096
+        assert agent.max_tokens == 2048  # Updated to match agent_models.json
         assert agent.fallback_model == "gpt-4o"
         assert agent.llm_service is not None
     

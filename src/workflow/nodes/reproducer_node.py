@@ -191,7 +191,7 @@ class ReproducerAgent:
         
         try:
             # 執行原始英文問題的 QA 推理
-            self.logger.debug("Executing QA for original English question")
+            self.logger.info("Processing original English question...")
             original_qa_result = self.execute_qa_reasoning(
                 original_question,
                 Language.ENGLISH,
@@ -200,7 +200,7 @@ class ReproducerAgent:
             original_qa_result.record_id = record_id
             
             # 執行翻譯中文問題的 QA 推理
-            self.logger.debug("Executing QA for translated Chinese question")
+            self.logger.info("Processing translated Chinese question...")
             translated_qa_result = self.execute_qa_reasoning(
                 translated_question,
                 Language.TRADITIONAL_CHINESE,

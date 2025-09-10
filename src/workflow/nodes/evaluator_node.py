@@ -370,10 +370,16 @@ class EvaluatorAgent:
         
         try:
             # 評估各個維度
+            self.logger.info("Evaluating semantic consistency...")
             semantic_score = self.evaluate_semantic_consistency(original_qa, translated_qa)
+            
+            self.logger.info("Evaluating code integrity...")
             code_score = self.evaluate_code_integrity(original_qa.generated_answer, translated_qa.generated_answer)
+            
+            self.logger.info("Evaluating translation naturalness...")
             naturalness_score = self.evaluate_translation_naturalness(translated_question, translated_answer)
             
+            self.logger.info("Generating improvement suggestions...")
             # 計算綜合品質分數
             overall_score = (semantic_score * 0.5 + code_score * 0.3 + naturalness_score * 0.2)
             

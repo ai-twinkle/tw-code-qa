@@ -428,3 +428,421 @@ class TestRecoveryManager:
         assert record_data["processing_status"] == "completed"
         assert record_data["final_quality_score"] == 8.0
         assert record_data["retry_count"] == 2
+
+    def test_save_record_json_decode_error_handling(self, recovery_manager, sample_record):
+        """測試保存記錄時處理 JSON 解析錯誤"""
+        # 先創建一個包含無效 JSON 的文件
+        with open(recovery_manager.results_file, "w", encoding="utf-8") as f:
+            f.write('{"id": "existing_001", "invalid": json}\n')  # 無效 JSON
+            f.write('{"id": "existing_002", "processing_status": "completed"}\n')  # 有效 JSON
+        
+        # 保存新記錄，應該跳過無效 JSON 並成功保存
+        success = recovery_manager.save_record(sample_record)
+        assert success
+        
+        # 檢查文件內容
+        with open(recovery_manager.results_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        
+        # 應該有 2 行：existing_002 和新的 sample_record
+        assert len(lines) == 2
+        
+        # 檢查新記錄存在
+        found_new_record = False
+        found_existing_valid = False
+        for line in lines:
+            record = json.loads(line.strip())
+            if record["id"] == "test_001":
+                found_new_record = True
+            elif record["id"] == "existing_002":
+                found_existing_valid = True
+        
+        assert found_new_record
+        assert found_existing_valid
+
+    def test_save_record_general_exception_handling(self, recovery_manager, sample_record):
+        """測試保存記錄時處理一般異常"""
+        # Mock format converter to raise an exception
+        original_converter = recovery_manager.format_converter
+        mock_converter = Mock()
+        mock_converter.processed_record_to_dict.side_effect = Exception("Mock exception")
+        recovery_manager.format_converter = mock_converter
+        
+        try:
+            # 保存記錄應該失敗並記錄錯誤
+            success = recovery_manager.save_record(sample_record)
+            assert success == False
+            
+            # 檢查文件沒有被創建或修改
+            if recovery_manager.results_file.exists():
+                with open(recovery_manager.results_file, "r", encoding="utf-8") as f:
+                    content = f.read()
+                    # 文件應該是空的或只包含舊內容
+                    assert "test_001" not in content
+        finally:
+            # 恢復原始的 format converter
+            recovery_manager.format_converter = original_converter
+
+    def test_get_processed_status_json_decode_error_handling(self, recovery_manager):
+        """測試獲取處理狀態時處理 JSON 解析錯誤"""
+        # 創建包含無效 JSON 的文件
+        with open(recovery_manager.results_file, "w", encoding="utf-8") as f:
+            f.write('{"id": "valid_001", "processing_status": "completed", "original": {"question": "Q1", "answer": "A1", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"}, "final_quality_score": 8.0, "processing_time": 10.0, "retry_count": 0, "translation": {"question": "TQ1", "answer": "TA1", "strategy": "test", "terminology_notes": [], "timestamp": 123456789}, "original_qa": {"question": "Q1", "answer": "A1", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}, "translated_qa": {"question": "TQ1", "answer": "TA1", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}}\n')
+            f.write('{"id": "invalid", "broken": json syntax}\n')  # 無效 JSON
+            f.write('{"id": "valid_002", "processing_status": "failed", "original": {"question": "Q2", "answer": "A2", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"}, "final_quality_score": 0.0, "processing_time": 1.0, "retry_count": 1}\n')
+        
+        # 應該能夠處理並跳過無效 JSON
+        status = recovery_manager.get_processed_status()
+        
+        # 應該只統計有效的記錄
+        assert "valid_001" in status["successful"]
+        assert "valid_002" in status["failed"]
+        assert status["total"] == 2
+
+    def test_is_record_complete_missing_basic_fields(self, recovery_manager):
+        """測試記錄完整性檢查 - 缺少基本欄位"""
+        # 測試缺少 'id' 欄位
+        record_no_id = {
+            "original": {"question": "Q", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0
+        }
+        assert recovery_manager._is_record_complete(record_no_id) == False
+        
+        # 測試缺少 'original' 欄位
+        record_no_original = {
+            "id": "test_001",
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0
+        }
+        assert recovery_manager._is_record_complete(record_no_original) == False
+        
+        # 測試缺少 'processing_status' 欄位
+        record_no_status = {
+            "id": "test_001",
+            "original": {"question": "Q", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0
+        }
+        assert recovery_manager._is_record_complete(record_no_status) == False
+
+    def test_is_record_complete_missing_original_fields(self, recovery_manager):
+        """測試記錄完整性檢查 - 缺少 original 欄位"""
+        # 測試缺少 original.question
+        record_missing_question = {
+            "id": "test_001",
+            "original": {"answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0
+        }
+        assert recovery_manager._is_record_complete(record_missing_question) == False
+        
+        # 測試缺少 original.answer
+        record_missing_answer = {
+            "id": "test_001",
+            "original": {"question": "Q", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0
+        }
+        assert recovery_manager._is_record_complete(record_missing_answer) == False
+        
+        # 測試缺少 original.source_dataset
+        record_missing_dataset = {
+            "id": "test_001",
+            "original": {"question": "Q", "answer": "A", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0
+        }
+        assert recovery_manager._is_record_complete(record_missing_dataset) == False
+
+    def test_is_record_complete_empty_original_fields(self, recovery_manager):
+        """測試記錄完整性檢查 - original 欄位為空"""
+        # 測試空的 original.question
+        record_empty_question = {
+            "id": "test_001",
+            "original": {"question": "", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0
+        }
+        assert recovery_manager._is_record_complete(record_empty_question) == False
+        
+        # 測試空的 original.answer
+        record_empty_answer = {
+            "id": "test_001",
+            "original": {"question": "Q", "answer": "", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0
+        }
+        assert recovery_manager._is_record_complete(record_empty_answer) == False
+
+    def test_is_record_complete_missing_translation_fields(self, recovery_manager):
+        """測試記錄完整性檢查 - 缺少翻譯相關欄位"""
+        # 測試缺少 translation 欄位
+        record_no_translation = {
+            "id": "test_001",
+            "original": {"question": "Q", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0,
+            "original_qa": {"question": "Q", "answer": "A", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8},
+            "translated_qa": {"question": "TQ", "answer": "TA", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}
+        }
+        assert recovery_manager._is_record_complete(record_no_translation) == False
+        
+        # 測試缺少 translation.question
+        record_missing_trans_question = {
+            "id": "test_001",
+            "original": {"question": "Q", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0,
+            "translation": {"answer": "TA", "strategy": "test", "terminology_notes": [], "timestamp": 123456789},
+            "original_qa": {"question": "Q", "answer": "A", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8},
+            "translated_qa": {"question": "TQ", "answer": "TA", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}
+        }
+        assert recovery_manager._is_record_complete(record_missing_trans_question) == False
+        
+        # 測試空的 translation.question
+        record_empty_trans_question = {
+            "id": "test_001",
+            "original": {"question": "Q", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0,
+            "translation": {"question": "", "answer": "TA", "strategy": "test", "terminology_notes": [], "timestamp": 123456789},
+            "original_qa": {"question": "Q", "answer": "A", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8},
+            "translated_qa": {"question": "TQ", "answer": "TA", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}
+        }
+        assert recovery_manager._is_record_complete(record_empty_trans_question) == False
+
+    def test_is_record_complete_missing_qa_fields(self, recovery_manager):
+        """測試記錄完整性檢查 - 缺少 QA 相關欄位"""
+        # 測試缺少 original_qa 欄位
+        record_no_original_qa = {
+            "id": "test_001",
+            "original": {"question": "Q", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0,
+            "translation": {"question": "TQ", "answer": "TA", "strategy": "test", "terminology_notes": [], "timestamp": 123456789},
+            "translated_qa": {"question": "TQ", "answer": "TA", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}
+        }
+        assert recovery_manager._is_record_complete(record_no_original_qa) == False
+        
+        # 測試缺少 translated_qa 欄位
+        record_no_translated_qa = {
+            "id": "test_001",
+            "original": {"question": "Q", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0,
+            "translation": {"question": "TQ", "answer": "TA", "strategy": "test", "terminology_notes": [], "timestamp": 123456789},
+            "original_qa": {"question": "Q", "answer": "A", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}
+        }
+        assert recovery_manager._is_record_complete(record_no_translated_qa) == False
+
+    def test_is_record_complete_invalid_numeric_values(self, recovery_manager):
+        """測試記錄完整性檢查 - 無效的數值"""
+        # 測試無效的 final_quality_score (負數)
+        record_invalid_quality = {
+            "id": "test_001",
+            "original": {"question": "Q", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": -1.0,  # 無效
+            "processing_time": 10.0,
+            "retry_count": 0,
+            "translation": {"question": "TQ", "answer": "TA", "strategy": "test", "terminology_notes": [], "timestamp": 123456789},
+            "original_qa": {"question": "Q", "answer": "A", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8},
+            "translated_qa": {"question": "TQ", "answer": "TA", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}
+        }
+        assert recovery_manager._is_record_complete(record_invalid_quality) == False
+        
+        # 測試無效的 processing_time (負數)
+        record_invalid_time = {
+            "id": "test_001",
+            "original": {"question": "Q", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": -5.0,  # 無效
+            "retry_count": 0,
+            "translation": {"question": "TQ", "answer": "TA", "strategy": "test", "terminology_notes": [], "timestamp": 123456789},
+            "original_qa": {"question": "Q", "answer": "A", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8},
+            "translated_qa": {"question": "TQ", "answer": "TA", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}
+        }
+        assert recovery_manager._is_record_complete(record_invalid_time) == False
+        
+        # 測試無效的 retry_count (負數)
+        record_invalid_retry = {
+            "id": "test_001",
+            "original": {"question": "Q", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": -1,  # 無效
+            "translation": {"question": "TQ", "answer": "TA", "strategy": "test", "terminology_notes": [], "timestamp": 123456789},
+            "original_qa": {"question": "Q", "answer": "A", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8},
+            "translated_qa": {"question": "TQ", "answer": "TA", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}
+        }
+        assert recovery_manager._is_record_complete(record_invalid_retry) == False
+
+    def test_is_record_complete_invalid_qa_values(self, recovery_manager):
+        """測試記錄完整性檢查 - 無效的 QA 數值"""
+        # 測試無效的 original_qa.execution_time
+        record_invalid_orig_exec_time = {
+            "id": "test_001",
+            "original": {"question": "Q", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0,
+            "translation": {"question": "TQ", "answer": "TA", "strategy": "test", "terminology_notes": [], "timestamp": 123456789},
+            "original_qa": {"question": "Q", "answer": "A", "execution_time": -1.0, "reasoning_steps": [], "confidence_score": 0.8},
+            "translated_qa": {"question": "TQ", "answer": "TA", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}
+        }
+        assert recovery_manager._is_record_complete(record_invalid_orig_exec_time) == False
+        
+        # 測試無效的 confidence_score (超出範圍)
+        record_invalid_confidence = {
+            "id": "test_001",
+            "original": {"question": "Q", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0,
+            "translation": {"question": "TQ", "answer": "TA", "strategy": "test", "terminology_notes": [], "timestamp": 123456789},
+            "original_qa": {"question": "Q", "answer": "A", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 1.5},  # 超出範圍
+            "translated_qa": {"question": "TQ", "answer": "TA", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}
+        }
+        assert recovery_manager._is_record_complete(record_invalid_confidence) == False
+
+    def test_is_record_complete_invalid_timestamp(self, recovery_manager):
+        """測試記錄完整性檢查 - 無效的時間戳"""
+        # 測試空的時間戳
+        record_empty_timestamp = {
+            "id": "test_001",
+            "original": {"question": "Q", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0,
+            "translation": {"question": "TQ", "answer": "TA", "strategy": "test", "terminology_notes": [], "timestamp": ""},
+            "original_qa": {"question": "Q", "answer": "A", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8},
+            "translated_qa": {"question": "TQ", "answer": "TA", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}
+        }
+        assert recovery_manager._is_record_complete(record_empty_timestamp) == False
+        
+        # 測試 None 時間戳
+        record_none_timestamp = {
+            "id": "test_001",
+            "original": {"question": "Q", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0,
+            "translation": {"question": "TQ", "answer": "TA", "strategy": "test", "terminology_notes": [], "timestamp": None},
+            "original_qa": {"question": "Q", "answer": "A", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8},
+            "translated_qa": {"question": "TQ", "answer": "TA", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}
+        }
+        assert recovery_manager._is_record_complete(record_none_timestamp) == False
+
+    def test_print_status_success_rate_calculation(self, recovery_manager, sample_record, capsys):
+        """測試打印狀態時的成功率計算"""
+        # 保存一個成功記錄
+        recovery_manager.save_record(sample_record)
+        
+        # 創建並保存一個失敗記錄
+        failed_record = ProcessedRecord(
+            original_record=OriginalRecord(
+                id="failed_001",
+                question="Failed question",
+                answer="Failed answer",
+                source_dataset="test",
+                metadata={},
+                complexity_level=ComplexityLevel.SIMPLE
+            ),
+            translation_result=None,
+            original_qa_result=None,
+            translated_qa_result=None,
+            processing_status=ProcessingStatus.FAILED,
+            final_quality_score=0.0,
+            processing_time=1.0,
+            retry_count=1
+        )
+        recovery_manager.save_record(failed_record)
+        
+        # 打印狀態（有總記錄數）
+        all_record_ids = ["test_001", "failed_001", "missing_001"]
+        recovery_manager.print_status(all_record_ids)
+        
+        captured = capsys.readouterr()
+        output = captured.out
+        
+        # 檢查成功率計算 (1成功 / 2總處理 = 50%)
+        assert "成功率: 50.0%" in output
+        assert "成功處理: 1 筆" in output
+        assert "處理失敗: 1 筆" in output
+        assert "總已處理: 2 筆" in output
+        assert "尚未處理: 1 筆" in output
+
+    def test_print_status_zero_total_handling(self, recovery_manager, capsys):
+        """測試打印狀態時處理總數為0的情況"""
+        # 不保存任何記錄，直接打印狀態
+        all_record_ids = ["test_001", "test_002"]
+        recovery_manager.print_status(all_record_ids)
+        
+        captured = capsys.readouterr()
+        output = captured.out
+        
+        # 應該沒有成功率顯示，因為總處理數為0
+        assert "成功率:" not in output
+        assert "成功處理: 0 筆" in output
+        assert "尚未處理: 2 筆" in output
+
+    def test_load_successful_records_exception_handling(self, recovery_manager, sample_record):
+        """測試載入成功記錄時的異常處理"""
+        # 保存一個有效記錄
+        recovery_manager.save_record(sample_record)
+        
+        # 添加無效 JSON 到文件
+        with open(recovery_manager.results_file, "a", encoding="utf-8") as f:
+            f.write('{"id": "invalid", "broken": json syntax}\n')
+            f.write('{"id": "valid_002", "processing_status": "completed", "original": {"question": "Q2", "answer": "A2", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"}, "final_quality_score": 7.0, "processing_time": 8.0, "retry_count": 0}\n')
+        
+        # 應該能夠處理異常並繼續載入有效的記錄
+        successful_records = recovery_manager.load_successful_records()
+        
+        # 應該只載入有效的記錄
+        assert len(successful_records) == 2  # test_001 和 valid_002
+        record_ids = {record.original_record.id for record in successful_records}
+        assert "test_001" in record_ids
+        assert "valid_002" in record_ids
+
+    def test_load_successful_records_file_not_exists(self, recovery_manager):
+        """測試載入成功記錄時文件不存在的情況"""
+        # 確保文件不存在
+        if recovery_manager.results_file.exists():
+            recovery_manager.results_file.unlink()
+        
+        # 應該返回空列表
+        successful_records = recovery_manager.load_successful_records()
+        assert successful_records == []

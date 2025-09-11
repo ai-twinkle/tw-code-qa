@@ -84,6 +84,11 @@ Then, run the main script with the dataset path and **always specify output dire
   uv run python main.py --dataset-path data/opencoder_dataset_package_instruct --output-dir output/package_instruct --environment production
   ```
 
+- Resume a previous run (continues from last checkpoint and re-runs failed/missing records):
+  ```bash
+  uv run python main.py --dataset-path data/opencoder_dataset_educational_instruct --output-dir output/educational_instruct --resume
+  ```
+
 ## Features
 
 - Dataset conversion for Traditional Chinese Code-QA

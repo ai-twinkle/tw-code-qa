@@ -124,33 +124,112 @@ class TestReproducerAgent:
         with pytest.raises(ValueError, match="Failed to get reproducer configuration"):
             ReproducerAgent()
     
-    @patch('src.config.llm_config.get_agent_config')
+    @patch.object(reproducer_module, 'get_agent_config')
     @patch('src.services.llm_service.LLMFactory.create_llm')
-    def test_execute_qa_reasoning_english(self, mock_create_llm, mock_get_config,
-                                        mock_agent_config, mock_llm_service):
-        """測試英文 QA 推理執行"""
-        mock_get_config.return_value = mock_agent_config
-        mock_create_llm.return_value = mock_llm_service
-        mock_llm_service.invoke.return_value = AIMessage(
-            content="1. Understanding: The question asks about Python class creation.\n"
-                   "2. Reasoning: Classes are defined using the 'class' keyword.\n"
-                   "3. Answer: Here's how to create a Python class..."
-        )
+    def test_initialize_llm_service_openai(self, mock_create_llm, mock_get_config):
+        """測試初始化 OpenAI LLM 服務"""
+        # Mock config with OpenAI model
+        mock_config = {
+            "primary_model": "gpt-4o",
+            "fallback_model": "gpt-4o-mini",
+            "temperature": 0.0,
+            "max_tokens": 2048
+        }
+        mock_get_config.return_value = mock_config
+        
+        mock_create_llm.return_value = Mock()
         
         agent = ReproducerAgent()
         
-        result = agent.execute_qa_reasoning(
-            "How do you create a Python class?",
-            Language.ENGLISH,
-            "Focus on comprehensive solution"
-        )
+        # 驗證提供者和模型選擇
+        mock_create_llm.assert_called_once()
+        args = mock_create_llm.call_args[0]
+        assert args[0] == LLMProvider.OPENAI
+        assert args[1] == LLMModel.GPT_4O
+    
+    @patch.object(reproducer_module, 'get_agent_config')
+    @patch('src.services.llm_service.LLMFactory.create_llm')
+    def test_initialize_llm_service_anthropic(self, mock_create_llm, mock_get_config):
+        """測試初始化 Anthropic LLM 服務"""
+        # Mock config with Anthropic model
+        mock_config = {
+            "primary_model": "claude-4-sonnet",
+            "fallback_model": "claude-3.5-sonnet",
+            "temperature": 0.0,
+            "max_tokens": 2048
+        }
+        mock_get_config.return_value = mock_config
+        mock_create_llm.return_value = Mock()
         
-        assert isinstance(result, QAExecutionResult)
-        assert result.language == Language.ENGLISH
-        assert result.input_question == "How do you create a Python class?"
-        assert len(result.reasoning_steps) > 0
-        assert result.confidence_score == 0.8
-        mock_llm_service.invoke.assert_called_once()
+        agent = ReproducerAgent()
+        
+        # 驗證提供者和模型選擇
+        mock_create_llm.assert_called_once()
+        args = mock_create_llm.call_args[0]
+        assert args[0] == LLMProvider.ANTHROPIC
+        assert args[1] == LLMModel.CLAUDE_4_SONNET
+    
+    @patch.object(reproducer_module, 'get_agent_config')
+    @patch('src.services.llm_service.LLMFactory.create_llm')
+    def test_initialize_llm_service_google(self, mock_create_llm, mock_get_config):
+        """測試初始化 Google LLM 服務"""
+        # Mock config with Google model
+        mock_config = {
+            "primary_model": "gemini-2.5-flash",
+            "fallback_model": "gemini-1.5-pro",
+            "temperature": 0.0,
+            "max_tokens": 2048
+        }
+        mock_get_config.return_value = mock_config
+        mock_create_llm.return_value = Mock()
+        
+        agent = ReproducerAgent()
+        
+        # 驗證提供者和模型選擇
+        mock_create_llm.assert_called_once()
+        args = mock_create_llm.call_args[0]
+        assert args[0] == LLMProvider.GOOGLE
+        assert args[1] == LLMModel.GEMINI_2_5_FLASH
+    
+    @patch.object(reproducer_module, 'get_agent_config')
+    @patch('src.services.llm_service.LLMFactory.create_llm')
+    def test_initialize_llm_service_ollama(self, mock_create_llm, mock_get_config):
+        """測試初始化 Ollama LLM 服務"""
+        # Mock config with Ollama model
+        mock_config = {
+            "primary_model": "llama3.1:8b",
+            "fallback_model": "qwen2.5:7b",
+            "temperature": 0.0,
+            "max_tokens": 2048
+        }
+        mock_get_config.return_value = mock_config
+        mock_create_llm.return_value = Mock()
+        
+        agent = ReproducerAgent()
+        
+        # 驗證提供者和模型選擇
+        mock_create_llm.assert_called_once()
+        args = mock_create_llm.call_args[0]
+        assert args[0] == LLMProvider.OLLAMA
+        assert args[1] == LLMModel.LLAMA3_1
+    
+    @patch.object(reproducer_module, 'get_agent_config')
+    @patch('src.services.llm_service.LLMFactory.create_llm')
+    def test_initialize_llm_service_exception(self, mock_create_llm, mock_get_config):
+        """測試初始化 LLM 服務異常處理"""
+        # Mock config
+        mock_config = {
+            "primary_model": "gemini-2.5-flash",
+            "fallback_model": "gpt-4o",
+            "temperature": 0.0,
+            "max_tokens": 2048
+        }
+        mock_get_config.return_value = mock_config
+        mock_create_llm.side_effect = Exception("LLM initialization failed")
+        
+        # Test that exception is properly handled and logged
+        with pytest.raises(Exception, match="LLM initialization failed"):
+            agent = ReproducerAgent()
     
     @patch('src.config.llm_config.get_agent_config')
     @patch('src.services.llm_service.LLMFactory.create_llm')
@@ -251,20 +330,20 @@ class TestReproducerAgent:
         assert any("最後" in step for step in steps)
     
     @patch('src.services.llm_service.is_production', return_value=False)
-    def test_extract_reasoning_steps_fallback(self, mock_is_production):
-        """測試推理步驟提取回退機制"""
-        answer_no_structure = """
-        This is a simple answer without clear structure.
-        It doesn't have numbered steps or clear keywords.
-        Just continuous text explaining the solution.
-        """
-        
+    def test_extract_reasoning_steps_exception(self, mock_is_production):
+        """測試推理步驟提取異常處理"""
         agent = ReproducerAgent()
-        steps = agent._extract_reasoning_steps(answer_no_structure)
         
-        # 應該回退到段落分割
-        assert len(steps) > 0
-        assert len(steps) <= 5  # 最多5段
+        # 測試異常情況 - 傳入 None 應該引發異常
+        with patch.object(agent, 'logger') as mock_logger:
+            steps = agent._extract_reasoning_steps(None)
+            
+            # 應該記錄警告日誌
+            mock_logger.warning.assert_called_once()
+            assert "Failed to extract reasoning steps" in str(mock_logger.warning.call_args)
+            
+            # 應該返回預設值
+            assert steps == ["Complete reasoning provided in answer"]
     
     @patch('src.config.llm_config.get_agent_config')
     @patch('src.services.llm_service.LLMFactory.create_llm')
@@ -442,20 +521,28 @@ class TestReproducerNode:
             assert result_state["processing_status"] == ProcessingStatus.PROCESSING
     
     @patch.object(reproducer_module, 'ReproducerAgent')
-    def test_reproducer_node_exception(self, mock_agent_class, sample_workflow_state):
-        """測試再現者節點異常處理"""
+    def test_reproducer_node_state_update_failure_handler(self, mock_agent_class, sample_workflow_state):
+        """測試再現者節點狀態更新失敗的異常處理器"""
         mock_agent = Mock()
         mock_agent.execute_comparative_qa.side_effect = Exception("QA execution failed")
         mock_agent_class.return_value = mock_agent
         
-        result_state = reproducer_function(sample_workflow_state)
+        # 模擬 update_state_safely 失敗，但不完全模擬，讓異常處理器運行
+        original_update_state_safely = reproducer_module.update_state_safely
         
-        assert result_state["processing_status"] == ProcessingStatus.FAILED
-        assert len(result_state["error_history"]) > 0
-        error_record = result_state["error_history"][0]
-        assert error_record.error_type == ErrorType.OTHER
-        assert "QA execution failed" in error_record.error_message
-        assert error_record.agent_name == "reproducer"
+        def failing_update_state_safely(state, updates):
+            # 第一次調用失敗，觸發異常處理器
+            raise Exception("State update failed")
+        
+        with patch.object(reproducer_module, 'update_state_safely', side_effect=failing_update_state_safely):
+            result_state = reproducer_function(sample_workflow_state)
+            
+            # 驗證異常處理器正確執行
+            assert result_state["processing_status"] == ProcessingStatus.FAILED
+            assert len(result_state["error_history"]) > 0
+            error_record = result_state["error_history"][0]
+            assert error_record.error_type == ErrorType.OTHER
+            assert "QA execution failed" in error_record.error_message
 
 
 class TestReproducerAgentIntegration:

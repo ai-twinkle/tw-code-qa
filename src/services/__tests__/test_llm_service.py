@@ -120,15 +120,110 @@ class TestLLMService:
         assert isinstance(result, LLMResponse)
         assert result.content == "模擬異步回應內容"
 
-    def test_invoke_error_handling(self, llm_service: LLMService) -> None:
-        """測試錯誤處理"""
-        llm_service._client.invoke.side_effect = Exception("模擬錯誤")
-        messages = [{"role": "user", "content": "錯誤測試"}]
+    def test_invoke_empty_response_retry(self, llm_service: LLMService) -> None:
+        """測試空回應的重試機制"""
+        # 第一次返回空內容，第二次返回有效內容
+        llm_service._client.invoke.side_effect = [
+            AIMessage(content=""),  # 空回應
+            AIMessage(content="有效的回應內容")  # 有效回應
+        ]
         
-        with pytest.raises(Exception) as exc_info:
+        messages = [{"role": "user", "content": "測試空回應重試"}]
+        result = llm_service.invoke(messages)
+        
+        assert isinstance(result, LLMResponse)
+        assert result.content == "有效的回應內容"
+        # 應該調用了兩次
+        assert llm_service._client.invoke.call_count == 2
+    
+    def test_invoke_empty_response_all_retries_fail(self, llm_service: LLMService) -> None:
+        """測試所有重試都返回空回應"""
+        llm_service._client.invoke.return_value = AIMessage(content="")
+        
+        messages = [{"role": "user", "content": "測試空回應失敗"}]
+        
+        with pytest.raises(ValueError) as exc_info:
             llm_service.invoke(messages)
         
-        assert "模擬錯誤" in str(exc_info.value)
+        assert "empty response" in str(exc_info.value).lower()
+        # 應該調用了 4 次（1 次初始 + 3 次重試）
+        assert llm_service._client.invoke.call_count == 4
+    
+    def test_invoke_retry_on_exception(self, llm_service: LLMService) -> None:
+        """測試異常情況下的重試機制"""
+        # 前兩次拋出異常，第三次成功
+        llm_service._client.invoke.side_effect = [
+            Exception("第一次失敗"),
+            Exception("第二次失敗"), 
+            AIMessage(content="最終成功")
+        ]
+        
+        messages = [{"role": "user", "content": "測試異常重試"}]
+        result = llm_service.invoke(messages)
+        
+        assert isinstance(result, LLMResponse)
+        assert result.content == "最終成功"
+        # 應該調用了三次
+        assert llm_service._client.invoke.call_count == 3
+    
+    @pytest.mark.asyncio
+    async def test_ainvoke_empty_response_retry(self, llm_service: LLMService) -> None:
+        """測試異步空回應的重試機制"""
+        call_count = 0
+        
+        async def mock_ainvoke_empty_first(messages):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return AIMessage(content="")
+            else:
+                return AIMessage(content="有效的異步回應內容")
+        
+        llm_service._client.ainvoke = mock_ainvoke_empty_first
+        
+        messages = [{"role": "user", "content": "測試異步空回應重試"}]
+        result = await llm_service.ainvoke(messages)
+        
+        assert isinstance(result, LLMResponse)
+        assert result.content == "有效的異步回應內容"
+        assert call_count == 2
+    
+    @pytest.mark.asyncio
+    async def test_ainvoke_empty_response_all_retries_fail(self, llm_service: LLMService) -> None:
+        """測試異步所有重試都返回空回應"""
+        async def mock_ainvoke_empty(messages):
+            return AIMessage(content="")
+        
+        llm_service._client.ainvoke = mock_ainvoke_empty
+        
+        messages = [{"role": "user", "content": "測試異步空回應失敗"}]
+        
+        with pytest.raises(ValueError) as exc_info:
+            await llm_service.ainvoke(messages)
+        
+        assert "empty response" in str(exc_info.value).lower()
+    
+    @pytest.mark.asyncio
+    async def test_ainvoke_retry_on_exception(self, llm_service: LLMService) -> None:
+        """測試異步異常情況下的重試機制"""
+        call_count = 0
+        
+        async def mock_ainvoke_with_retry(messages):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise Exception(f"異步失敗 {call_count}")
+            else:
+                return AIMessage(content="異步最終成功")
+        
+        llm_service._client.ainvoke = mock_ainvoke_with_retry
+        
+        messages = [{"role": "user", "content": "測試異步異常重試"}]
+        result = await llm_service.ainvoke(messages)
+        
+        assert isinstance(result, LLMResponse)
+        assert result.content == "異步最終成功"
+        assert call_count == 3
 
     @pytest.mark.asyncio
     async def test_ainvoke_error_handling(self, llm_service: LLMService) -> None:
@@ -292,15 +387,48 @@ class TestProductionModeAPIKeyValidation:
 
     @patch('src.services.llm_service.is_production', return_value=True)
     @patch.dict('os.environ', {}, clear=True)
-    def test_production_mode_missing_openai_api_key(self, mock_is_production) -> None:
-        """測試生產模式下缺少 OpenAI API 密鑰"""
+    def test_production_mode_missing_api_key_error_details(self, mock_is_production) -> None:
+        """測試生產模式下缺少 API 密鑰的詳細錯誤信息"""
         with pytest.raises(MissingAPIKeyError) as exc_info:
             LLMService(LLMProvider.OPENAI, LLMModel.GPT_4O)
         
         error_message = str(exc_info.value)
         assert "在生產環境中必須配置 OPENAI_API_KEY" in error_message
+        assert "請執行以下步驟" in error_message
         assert "cp .env.example .env" in error_message
         assert "OPENAI_API_KEY=your_actual_api_key" in error_message
+
+    @patch('src.services.llm_service.is_production', return_value=True)
+    @patch.dict('os.environ', {}, clear=True)
+    def test_production_mode_missing_anthropic_key_error_details(self, mock_is_production) -> None:
+        """測試生產模式下缺少 Anthropic API 密鑰的詳細錯誤信息"""
+        with pytest.raises(MissingAPIKeyError) as exc_info:
+            LLMService(LLMProvider.ANTHROPIC, LLMModel.CLAUDE_4_SONNET)
+        
+        error_message = str(exc_info.value)
+        assert "在生產環境中必須配置 ANTHROPIC_API_KEY" in error_message
+
+    @patch('src.services.llm_service.is_production', return_value=True)
+    @patch.dict('os.environ', {}, clear=True)
+    def test_production_mode_missing_google_key_error_details(self, mock_is_production) -> None:
+        """測試生產模式下缺少 Google API 密鑰的詳細錯誤信息"""
+        with pytest.raises(MissingAPIKeyError) as exc_info:
+            LLMService(LLMProvider.GOOGLE, LLMModel.GEMINI_2_5_FLASH)
+        
+        error_message = str(exc_info.value)
+        assert "在生產環境中必須配置 GOOGLE_API_KEY" in error_message
+
+    @patch('src.services.llm_service.is_production', return_value=True)
+    @patch('src.services.llm_service.init_chat_model')
+    @patch.dict('os.environ', {}, clear=True)
+    def test_production_mode_ollama_no_api_key_required(self, mock_init, mock_is_production) -> None:
+        """測試生產模式下 Ollama 不需要 API 密鑰"""
+        mock_init.return_value = Mock()
+        
+        # Ollama 不應該拋出 MissingAPIKeyError
+        service = LLMService(LLMProvider.OLLAMA, LLMModel.LLAMA3_1)
+        assert service.provider == LLMProvider.OLLAMA
+        assert service.model == LLMModel.LLAMA3_1
 
     @patch('src.services.llm_service.is_production', return_value=True)
     @patch.dict('os.environ', {}, clear=True)
@@ -514,13 +642,49 @@ class TestMockClientBehavior:
         assert "開發模式的 mock 回應" in response.content
 
     @pytest.mark.asyncio
-    async def test_mock_client_async_response(self) -> None:
-        """測試 Mock 客戶端異步回應"""
+    async def test_mock_client_async_semantic_evaluation_response(self) -> None:
+        """測試 Mock 客戶端異步語義評估回應"""
         from src.services.llm_service import LLMService
         
         mock_client = LLMService._create_mock_client()
         
-        # 測試異步請求
+        # 測試異步語義評估請求
         messages = [HumanMessage(content="請評估語義一致性")]
         response = await mock_client.ainvoke(messages)
         assert response.content == "8.5"
+
+    @pytest.mark.asyncio
+    async def test_mock_client_async_translation_response(self) -> None:
+        """測試 Mock 客戶端異步翻譯回應"""
+        from src.services.llm_service import LLMService
+        
+        mock_client = LLMService._create_mock_client()
+        
+        # 測試異步翻譯請求
+        messages = [HumanMessage(content="請翻譯這個程式問題")]
+        response = await mock_client.ainvoke(messages)
+        assert "翻譯" in response.content
+
+    @pytest.mark.asyncio
+    async def test_mock_client_async_execution_response(self) -> None:
+        """測試 Mock 客戶端異步執行回應"""
+        from src.services.llm_service import LLMService
+        
+        mock_client = LLMService._create_mock_client()
+        
+        # 測試異步執行請求
+        messages = [HumanMessage(content="請執行這個程式問題")]
+        response = await mock_client.ainvoke(messages)
+        assert "執行" in response.content or "回答" in response.content
+
+    @pytest.mark.asyncio
+    async def test_mock_client_async_default_response(self) -> None:
+        """測試 Mock 客戶端異步預設回應"""
+        from src.services.llm_service import LLMService
+        
+        mock_client = LLMService._create_mock_client()
+        
+        # 測試異步一般請求
+        messages = [HumanMessage(content="一般問題")]
+        response = await mock_client.ainvoke(messages)
+        assert "開發模式的 mock 回應" in response.content

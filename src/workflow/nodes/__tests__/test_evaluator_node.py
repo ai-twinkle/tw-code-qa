@@ -8,6 +8,7 @@ Test module for Evaluator Node
 import sys
 import time
 import importlib
+import json
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -38,12 +39,17 @@ def mock_llm_service():
 
 @pytest.fixture
 def mock_agent_config():
-    """模擬 agent 配置"""
+    """模擬 agent 配置 - 從 agent_models.json 動態載入"""
+    config_path = Path(__file__).parent.parent.parent.parent / "config" / "agent_models.json"
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config_data = json.load(f)
+    
+    agent_config = config_data["agents"]["evaluator"]
     return {
-        "primary_model": "gpt-4o",
-        "fallback_model": "claude-4-sonnet",
-        "temperature": 0.1,
-        "max_tokens": 4096
+        "primary_model": agent_config["primary_model"],
+        "fallback_model": agent_config["fallback_models"][0] if agent_config["fallback_models"] else None,
+        "temperature": agent_config["model_parameters"]["temperature"],
+        "max_tokens": agent_config["model_parameters"]["max_tokens"]
     }
 
 
@@ -105,16 +111,22 @@ class TestEvaluatorAgent:
     """評估者 Agent 測試類"""
     
     @patch('src.services.llm_service.is_production', return_value=False)
-    def test_init(self, mock_is_production):
+    def test_init(self, mock_is_production, mock_agent_config):
         """測試 EvaluatorAgent 初始化"""
-        agent = EvaluatorAgent()
-        
-        # Verify the agent is initialized with correct config values
-        assert agent.primary_model == "gpt-4o"
-        assert agent.temperature == 0.1
-        assert agent.max_tokens == 2048  # Updated to match agent_models.json
-        assert agent.fallback_model == "claude-4-sonnet"
-        assert agent.llm_service is not None
+        with patch('src.config.llm_config.get_agent_config') as mock_get_config:
+            mock_get_config.return_value = mock_agent_config
+            
+            with patch('src.services.llm_service.LLMFactory.create_llm') as mock_create_llm:
+                mock_create_llm.return_value = Mock()
+                
+                agent = EvaluatorAgent()
+                
+                # Verify the agent is initialized with correct config values
+                assert agent.primary_model == mock_agent_config["primary_model"]
+                assert agent.temperature == mock_agent_config["temperature"]
+                assert agent.max_tokens == mock_agent_config["max_tokens"]
+                assert agent.fallback_model == mock_agent_config["fallback_model"]
+                assert agent.llm_service is not None
     
     @patch.object(evaluator_module, 'get_agent_config')
     def test_init_no_config(self, mock_get_config):
@@ -126,15 +138,26 @@ class TestEvaluatorAgent:
     
     @patch('src.config.llm_config.get_agent_config')
     @patch('src.services.llm_service.LLMFactory.create_llm')
-    def test_initialize_llm_service_openai(self, mock_create_llm, mock_get_config, mock_llm_service):
-        """測試初始化 OpenAI LLM 服務"""
-        config = {"primary_model": "gpt-4o", "temperature": 0.1, "max_tokens": 4000}
-        mock_get_config.return_value = config
+    def test_initialize_llm_service(self, mock_create_llm, mock_get_config, mock_llm_service, mock_agent_config):
+        """測試初始化 LLM 服務"""
+        mock_get_config.return_value = mock_agent_config
         mock_create_llm.return_value = mock_llm_service
         
         agent = EvaluatorAgent()
         
-        mock_create_llm.assert_called_once_with(LLMProvider.OPENAI, LLMModel.GPT_4O)
+        # Determine expected provider and model based on primary_model
+        if mock_agent_config["primary_model"] == "gpt-4o":
+            expected_provider = LLMProvider.OPENAI
+            expected_model = LLMModel.GPT_4O
+        elif mock_agent_config["primary_model"] == "gemini-2.5-flash":
+            expected_provider = LLMProvider.GOOGLE
+            expected_model = LLMModel.GEMINI_2_5_FLASH
+        else:
+            # For other models, we'll need to add more cases
+            expected_provider = LLMProvider.OPENAI
+            expected_model = LLMModel.GPT_4O
+        
+        mock_create_llm.assert_called_once_with(expected_provider, expected_model)
     
     @patch.object(evaluator_module, 'get_agent_config')
     @patch('src.services.llm_service.LLMFactory.create_llm')

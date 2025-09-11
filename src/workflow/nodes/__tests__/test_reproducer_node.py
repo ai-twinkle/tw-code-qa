@@ -8,6 +8,7 @@ Test module for Reproducer Node
 import sys
 import time
 import importlib
+import json
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -44,12 +45,17 @@ def mock_llm_service():
 
 @pytest.fixture
 def mock_agent_config():
-    """模擬 agent 配置"""
+    """模擬 agent 配置 - 從 agent_models.json 動態載入"""
+    config_path = Path(__file__).parent.parent.parent.parent / "config" / "agent_models.json"
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config_data = json.load(f)
+    
+    agent_config = config_data["agents"]["reproducer"]
     return {
-        "primary_model": "claude-4-sonnet",
-        "fallback_model": "gpt-4o",
-        "temperature": 0.0,
-        "max_tokens": 4096
+        "primary_model": agent_config["primary_model"],
+        "fallback_model": agent_config["fallback_models"][0] if agent_config["fallback_models"] else None,
+        "temperature": agent_config["model_parameters"]["temperature"],
+        "max_tokens": agent_config["model_parameters"]["max_tokens"]
     }
 
 
@@ -93,16 +99,22 @@ class TestReproducerAgent:
     """再現者 Agent 測試類"""
     
     @patch('src.services.llm_service.is_production', return_value=False)
-    def test_init(self, mock_is_production):
+    def test_init(self, mock_is_production, mock_agent_config):
         """測試 ReproducerAgent 初始化"""
-        agent = ReproducerAgent()
-        
-        # Verify the agent is initialized with correct config values
-        assert agent.primary_model == "claude-4-sonnet"
-        assert agent.temperature == 0.0
-        assert agent.max_tokens == 2048  # Updated to match agent_models.json
-        assert agent.fallback_model == "gpt-4o"
-        assert agent.llm_service is not None
+        with patch('src.config.llm_config.get_agent_config') as mock_get_config:
+            mock_get_config.return_value = mock_agent_config
+            
+            with patch('src.services.llm_service.LLMFactory.create_llm') as mock_create_llm:
+                mock_create_llm.return_value = Mock()
+                
+                agent = ReproducerAgent()
+                
+                # Verify the agent is initialized with correct config values
+                assert agent.primary_model == mock_agent_config["primary_model"]
+                assert agent.temperature == mock_agent_config["temperature"]
+                assert agent.max_tokens == mock_agent_config["max_tokens"]
+                assert agent.fallback_model == mock_agent_config["fallback_model"]
+                assert agent.llm_service is not None
     
     @patch.object(reproducer_module, 'get_agent_config')
     def test_init_no_config(self, mock_get_config):

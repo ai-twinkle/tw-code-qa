@@ -246,11 +246,17 @@ graph TB
 #### 核心資料結構定義
 
 ```python
-from enum import Enum
 from dataclasses import dataclass, field
-from typing import List, Optional
-from typing_extensions import TypedDict, Annotated
-from langgraph.graph import add_messages
+from enum import Enum
+from typing import List, Dict, Optional, TypedDict
+import time
+
+
+# ----------------------------------------------------------------------------
+# region                            核心資料模型 (Core Data Models)
+# ----------------------------------------------------------------------------
+
+# region 枚舉類型 (Enum Types)
 
 class ProcessingStatus(Enum):
     """處理狀態枚舉"""
@@ -266,16 +272,6 @@ class ComplexityLevel(Enum):
     SIMPLE = "simple"
     MEDIUM = "medium"
     COMPLEX = "complex"
-
-class ErrorType(Enum):
-    """錯誤類型枚舉"""
-    API_CONNECTION = "api_connection"
-    TRANSLATION_QUALITY = "translation_quality"
-    SYNTAX_ERROR = "syntax_error"
-    TIMEOUT = "timeout"
-    AUTHENTICATION = "authentication"
-    RATE_LIMIT = "rate_limit"
-    OTHER = "other"
 
 class Language(Enum):
     """語言類型枚舉"""
@@ -298,94 +294,96 @@ class CharacterEncoding(Enum):
     UTF16 = "utf-16"
     UTF32 = "utf-32"
     ASCII = "ascii"
-    GBK = "gbk"
-    BIG5 = "big5"
 
-@dataclass
-class RecordMetadata:
-    """資料記錄元資料結構"""
-    original_length: int           # 原始文本長度
-    code_block_count: int         # 程式碼區塊數量
-    complexity_level: ComplexityLevel # 複雜度級別
-    language_hints: List[str]     # 涉及的程式語言
-    topic_tags: List[str]         # 主題標籤
-    estimated_difficulty: int     # 估計難度 1-10
-    has_mathematical_content: bool # 是否包含數學內容
-    character_encoding: CharacterEncoding # 字符編碼
-    created_timestamp: float      # 創建時間戳
+class ErrorType(Enum):
+    """錯誤類型枚舉"""
+    API_CONNECTION = "api_connection"
+    TRANSLATION_QUALITY = "translation_quality"
+    SYNTAX_ERROR = "syntax_error"
+    TIMEOUT = "timeout"
+    AUTHENTICATION = "authentication"
+    RATE_LIMIT = "rate_limit"
+    OTHER = "other"
 
-@dataclass
-class ErrorRecord:
-    """錯誤記錄結構"""
-    error_type: ErrorType          # 錯誤類型
-    error_message: str           # 錯誤訊息
-    timestamp: float             # 發生時間戳
-    retry_attempt: int           # 重試次數
-    agent_name: str              # 發生錯誤的 Agent
-    recovery_action: str         # 恢復措施
+# endregion
 
-@dataclass
-class ProcessingMetadata:
-    """處理過程元資料結構"""
-    total_processing_time: float    # 總處理時間（秒）
-    translation_time: float         # 翻譯時間（秒）
-    qa_execution_time: float        # QA執行時間（秒）
-    evaluation_time: float          # 評估時間（秒）
-    retry_count: int                # 重試次數
-    models_used: List[str]          # 使用的模型列表
-    api_calls_count: int            # API 呼叫次數
-    tokens_consumed: int            # 消耗的 token 數
-    processing_stage: ProcessingStage # 處理階段
-    cost_estimation_usd: float      # 成本估算（美元）
+# region 核心資料結構 (Core Data Structures)
 
-@dataclass
-class SourceInfo:
-    """來源資料集資訊結構"""
-    dataset_name: str              # 資料集名稱
-    dataset_version: str           # 資料集版本
-    original_index: str            # 在原始資料集中的索引
-    subset_name: str               # 子集名稱（如 'train', 'test'）
-    download_url: str              # 下載來源 URL
-    license_info: str              # 授權資訊
-    collection_date: str           # 收集日期
+class RecordMetadata(TypedDict, total=False):
+    """
+    記錄元數據結構
+    包含記錄的基本元數據和從 flags 動態合併的欄位
+    """
+    tag: str                    # 記錄標籤/類別
+    source_index: int           # 原始資料集中的索引
+    refusal: bool               # 是否為拒絕回答
+    unsolicited: bool           # 是否為主動提供的內容
+    nsfw: bool                  # 是否包含不當內容
+    pii: bool                   # 是否包含個人識別資訊
+    disclaimer: bool            # 是否需要免責聲明
 
 @dataclass
 class OriginalRecord:
-    """原始資料記錄結構"""
+    """原始資料記錄"""
     id: str
-    instruction: str        # 原始英文問題
-    output: str            # 原始英文答案  
-    source_dataset: str    # 來源資料集名稱
-    metadata: RecordMetadata
+    question: str
+    answer: str
+    source_dataset: str
+    metadata: RecordMetadata = field(default_factory=dict)
+    complexity_level: Optional[ComplexityLevel] = None
 
-@dataclass
+@dataclass 
 class TranslationResult:
-    """翻譯結果結構"""
-    translated_instruction: str    # 翻譯後問題
-    translated_output: str         # 翻譯後答案
-    confidence_score: float        # 翻譯信心分數
-    processing_time: float         # 處理時間（秒）
+    """翻譯結果"""
+    original_record_id: str
+    translated_question: str
+    translated_answer: str
+    translation_strategy: str
+    terminology_notes: List[str] = field(default_factory=list)
+    timestamp: float = field(default_factory=time.time)
 
 @dataclass
 class QAExecutionResult:
     """QA 執行結果"""
-    question: str                  # 輸入問題
-    answer: str                    # LLM 生成答案
-    language: Language             # 問題語言
-    reasoning_steps: List[str]     # 推理步驟
-    execution_time: float          # 執行時間
-    model_used: str                # 使用的模型
+    record_id: str
+    language: Language
+    input_question: str
+    generated_answer: str
+    execution_time: float
+    reasoning_steps: List[str] = field(default_factory=list)
+    confidence_score: Optional[float] = None
+    timestamp: float = field(default_factory=time.time)
 
 @dataclass
 class QualityAssessment:
     """品質評估結果"""
-    semantic_consistency_score: float     # 語義一致性分數 (0-10)
-    code_integrity_score: float           # 程式碼完整性分數 (0-10)
-    translation_naturalness: float        # 翻譯自然度分數 (0-10)
-    overall_quality: float                # 綜合品質分數 (0-10)
-    improvement_suggestions: List[str]    # 改進建議
-    requires_retry: bool                  # 是否需要重試
-    
+    record_id: str
+    semantic_consistency_score: float  # 語義一致性分數 (0-10)
+    code_integrity_score: float       # 程式碼完整性分數 (0-10)
+    translation_naturalness_score: float  # 翻譯自然度分數 (0-10)
+    overall_quality_score: float      # 綜合品質分數
+    semantic_analysis: str
+    code_analysis: str
+    naturalness_analysis: str
+    improvement_suggestions: List[str] = field(default_factory=list)
+    evaluator_model: str = ""
+    evaluation_timestamp: float = field(default_factory=time.time)
+
+# endregion
+
+# region 處理與狀態管理 (Processing & State Management)
+
+@dataclass
+class ErrorRecord:
+    """錯誤記錄"""
+    error_type: ErrorType
+    error_message: str
+    timestamp: float
+    retry_attempt: int
+    agent_name: str
+    recovery_action: str
+    context_data: Dict[str, str] = field(default_factory=dict)
+
 @dataclass
 class ProcessingState:
     """LangGraph 狀態管理"""
@@ -398,50 +396,87 @@ class ProcessingState:
     processing_status: ProcessingStatus = ProcessingStatus.PENDING
     error_history: List[ErrorRecord] = field(default_factory=list)
     improvement_suggestions: List[str] = field(default_factory=list)
-    
-@dataclass
-class FinalRecord:
-    """最終輸出記錄"""
-    id: str
-    original_instruction: str
-    original_output: str
-    translated_instruction: str
-    translated_output: str
-    quality_metadata: QualityAssessment
-    processing_metadata: ProcessingMetadata  # 包含處理時間、重試次數、使用的模型等
-    source_info: SourceInfo         # 來源資料集資訊
-    validation_notes: List[str] = field(default_factory=list)  # 驗證備註
 
 @dataclass
-class CostEstimation:
-    """成本估算結構"""
-    openai_cost_usd: float         # OpenAI 成本
-    anthropic_cost_usd: float      # Anthropic 成本
-    google_cost_usd: float         # Google 成本
-    ollama_cost_usd: float         # Ollama 成本（通常為0）
-    total_cost_usd: float          # 總成本
-    
-@dataclass
-class ErrorSummary:
-    """錯誤統計結構"""
-    api_connection_errors: int     # API 連接錯誤次數
-    translation_quality_issues: int # 翻譯品質問題次數
-    syntax_errors: int             # 語法錯誤次數
-    timeout_errors: int            # 超時錯誤次數
-    authentication_errors: int     # 認證錯誤次數
-    rate_limit_errors: int         # 速率限制錯誤次數
-    other_errors: int              # 其他錯誤次數
+class ProcessedRecord:
+    """處理完成的記錄"""
+    original_record: OriginalRecord
+    translation_result: Optional[TranslationResult]
+    original_qa_result: Optional[QAExecutionResult]
+    translated_qa_result: Optional[QAExecutionResult]
+    processing_status: ProcessingStatus
+    final_quality_score: float
+    processing_time: float
+    retry_count: int = 0
 
-@dataclass  
-class BatchProcessingResult:
-    """批次處理結果統計"""
+# endregion
+
+# ----------------------------------------------------------------------------
+# endregion
+# ----------------------------------------------------------------------------
+
+
+# ----------------------------------------------------------------------------
+# region                      批次與報告模型 (Batch & Report Models)
+# ----------------------------------------------------------------------------
+
+class ProcessingConfig(TypedDict, total=False):
+    """處理配置結構"""
+    max_retries: int
+    timeout_seconds: int
+    enable_caching: bool
+    batch_size: int
+    parallel_workers: int
+    output_format: str
+    quality_threshold: float
+
+@dataclass
+class DatasetMetadata:
+    """資料集元資料"""
+    name: str
+    version: str
+    description: str
     total_records: int
-    successful_records: int
+    processed_records: int
+    source_language: Language
+    target_language: Language
+    creation_timestamp: float = field(default_factory=time.time)
+    processing_config: ProcessingConfig = field(default_factory=dict)
+
+@dataclass 
+class QualityReport:
+    """單一記錄品質報告"""
+    record_id: str
+    quality_assessment: QualityAssessment
+    processing_time: float
+    retry_count: int
+    final_status: str  # "passed", "failed", "needs_manual_review"
+    error_history: List[ErrorRecord] = field(default_factory=list)
+
+@dataclass
+class BatchQualityReport:
+    """批次品質報告"""
+    batch_id: str
+    total_records: int
+    processed_records: int
+    passed_records: int
     failed_records: int
+    retry_records: int
     average_quality_score: float
-    processing_time_seconds: float
-    cost_estimation: CostEstimation  # 各 Provider 的成本估算
-    error_summary: ErrorSummary      # 錯誤類型統計
+    min_quality_score: float
+    max_quality_score: float
+    total_processing_time: float
+    average_processing_time: float
+    total_retries: int
+    error_summary: Dict[ErrorType, int] = field(default_factory=dict)
+    individual_reports: List[QualityReport] = field(default_factory=list)
+    batch_start_time: float = field(default_factory=time.time)
+    batch_end_time: Optional[float] = None
+
+# ----------------------------------------------------------------------------
+# endregion
+# ----------------------------------------------------------------------------
+
 ```
 
 ## 系統架構圖 / System Architecture Diagram
@@ -673,7 +708,10 @@ project-root/
     ├── models/
     │   ├── __init__.py
     │   ├── dataset.py          # 資料集類型定義
-    │   └── quality.py          # 品質評估類型
+    │   ├── quality.py          # 品質評估類型
+    │   └── __tests__/
+    │       ├── test_dataset.py
+    │       └── test_quality.py
     │
     ├── workflow/
     │   ├── __init__.py

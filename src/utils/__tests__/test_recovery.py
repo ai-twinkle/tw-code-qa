@@ -95,10 +95,7 @@ class TestRecoveryManager:
     
     def test_get_processed_status_with_records(self, recovery_manager, sample_record):
         """測試有記錄的狀態"""
-        # 保存成功記錄
-        recovery_manager.save_record(sample_record)
-        
-        # 保存失敗記錄
+        # 先保存失敗記錄
         failed_record = ProcessedRecord(
             original_record=sample_record.original_record,
             translation_result=None,
@@ -110,6 +107,9 @@ class TestRecoveryManager:
             retry_count=1
         )
         recovery_manager.save_record(failed_record)
+        
+        # 後來保存成功記錄（覆蓋失敗記錄）
+        recovery_manager.save_record(sample_record)
         
         status = recovery_manager.get_processed_status()
         assert "test_001" in status["successful"]

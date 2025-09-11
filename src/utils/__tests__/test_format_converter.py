@@ -614,7 +614,7 @@ class TestEdgeCases:
         # 創建一個無法序列化的記錄
         mock_record = Mock()
         
-        with patch.object(converter, '_processed_record_to_dict', return_value={'bad_key': object()}):
+        with patch.object(converter, 'processed_record_to_dict', return_value={'bad_key': object()}):
             with pytest.raises(FormatConversionError, match="JSONL conversion failed"):
                 converter.records_to_jsonl([mock_record], "test.jsonl")
 

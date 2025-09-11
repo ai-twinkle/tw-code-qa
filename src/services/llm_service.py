@@ -13,8 +13,8 @@ from typing import List, Dict, Union
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 
-from ..constants.llm import LLMModel, LLMProvider
 from ..config.settings import is_production
+from ..constants.llm import LLMModel, LLMProvider
 
 
 class MissingAPIKeyError(Exception):
@@ -199,38 +199,98 @@ class LLMService:
         return langchain_messages
     
     def invoke(self, messages: Union[List[Dict[str, str]], List[BaseMessage]]) -> LLMResponse:
-        """同步調用 LLM"""
+        """同步調用 LLM，包含重試機制"""
         start_time = time.time()
-        
         langchain_messages = self._convert_messages(messages)
-        response = self._client.invoke(langchain_messages)
         
-        response_time = time.time() - start_time
+        max_retries = 3
+        retry_delay = 1.0
+        last_error = None
         
-        return LLMResponse(
-            content=str(response.content),
-            model_name=self.model.value,
-            provider=self.provider.value,
-            response_time=response_time,
-            timestamp=time.time()
-        )
-    
+        for attempt in range(max_retries + 1):
+            try:
+                response = self._client.invoke(langchain_messages)
+                content = str(response.content).strip()
+                
+                # 檢查響應是否為空
+                if not content:
+                    error_msg = f"Empty response from LLM (attempt {attempt + 1}/{max_retries + 1})"
+                    print(f"Warning: {error_msg}")
+                    if attempt < max_retries:
+                        time.sleep(retry_delay * (attempt + 1))
+                        continue
+                    else:
+                        raise ValueError("LLM returned empty response after all retry attempts")
+                
+                response_time = time.time() - start_time
+                return LLMResponse(
+                    content=content,
+                    model_name=self.model.value,
+                    provider=self.provider.value,
+                    response_time=response_time,
+                    timestamp=time.time()
+                )
+                
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries:
+                    print(f"LLM call failed, retrying... (attempt {attempt + 1}/{max_retries + 1}): {e}")
+                    time.sleep(retry_delay * (attempt + 1))
+                    continue
+                else:
+                    print(f"LLM call failed after all retry attempts: {e}")
+                    raise e
+        
+        # 這行永遠不應該執行到，但作為安全措施
+        raise RuntimeError(f"Unexpected end of retry loop. Last error: {last_error}")
+
     async def ainvoke(self, messages: Union[List[Dict[str, str]], List[BaseMessage]]) -> LLMResponse:
-        """非同步調用 LLM"""
+        """非同步調用 LLM，包含重試機制"""
+        import asyncio
+
         start_time = time.time()
-        
         langchain_messages = self._convert_messages(messages)
-        response = await self._client.ainvoke(langchain_messages)
+
+        max_retries = 3
+        retry_delay = 1.0
+        last_error = None
+
+        for attempt in range(max_retries + 1):
+            try:
+                response = await self._client.ainvoke(langchain_messages)
+                content = str(response.content).strip()
+
+                # 檢查響應是否為空
+                if not content:
+                    error_msg = f"Empty response from LLM (attempt {attempt + 1}/{max_retries + 1})"
+                    print(f"Warning: {error_msg}")
+                    if attempt < max_retries:
+                        await asyncio.sleep(retry_delay * (attempt + 1))
+                        continue
+                    else:
+                        raise ValueError("LLM returned empty response after all retry attempts")
+
+                response_time = time.time() - start_time
+                return LLMResponse(
+                    content=content,
+                    model_name=self.model.value,
+                    provider=self.provider.value,
+                    response_time=response_time,
+                    timestamp=time.time()
+                )
+
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries:
+                    print(f"LLM call failed, retrying... (attempt {attempt + 1}/{max_retries + 1}): {e}")
+                    await asyncio.sleep(retry_delay * (attempt + 1))
+                    continue
+                else:
+                    print(f"LLM call failed after all retry attempts: {e}")
+                    raise e
         
-        response_time = time.time() - start_time
-        
-        return LLMResponse(
-            content=str(response.content),
-            model_name=self.model.value,
-            provider=self.provider.value,
-            response_time=response_time,
-            timestamp=time.time()
-        )
+        # 這行永遠不應該執行到，但作為安全措施
+        raise RuntimeError(f"Unexpected end of retry loop. Last error: {last_error}")
 
 
 class LLMFactory:

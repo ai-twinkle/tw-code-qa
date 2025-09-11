@@ -488,7 +488,7 @@ class TestRecoveryManager:
         # 創建包含無效 JSON 的文件
         with open(recovery_manager.results_file, "w", encoding="utf-8") as f:
             f.write('{"id": "valid_001", "processing_status": "completed", "original": {"question": "Q1", "answer": "A1", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"}, "final_quality_score": 8.0, "processing_time": 10.0, "retry_count": 0, "translation": {"question": "TQ1", "answer": "TA1", "strategy": "test", "terminology_notes": [], "timestamp": 123456789}, "original_qa": {"question": "Q1", "answer": "A1", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}, "translated_qa": {"question": "TQ1", "answer": "TA1", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}}\n')
-            f.write('{"id": "invalid", "broken": json syntax}\n')  # 無效 JSON
+            f.write('{"incomplete": json, "missing": quotes}\n')  # 無效 JSON
             f.write('{"id": "valid_002", "processing_status": "failed", "original": {"question": "Q2", "answer": "A2", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"}, "final_quality_score": 0.0, "processing_time": 1.0, "retry_count": 1}\n')
         
         # 應該能夠處理並跳過無效 JSON
@@ -837,6 +837,22 @@ class TestRecoveryManager:
         assert "test_001" in record_ids
         assert "valid_002" in record_ids
 
+    def test_load_successful_records_general_exception_handling(self, recovery_manager, sample_record):
+        """測試載入成功記錄時一般異常的處理"""
+        # 保存一個有效記錄
+        recovery_manager.save_record(sample_record)
+        
+        # 添加會導致一般異常的記錄（例如無效的 enum 值）
+        with open(recovery_manager.results_file, "a", encoding="utf-8") as f:
+            f.write('{"id": "exception_001", "processing_status": "completed", "original": {"question": "Q3", "answer": "A3", "source_dataset": "test", "metadata": {}, "complexity_level": "invalid_enum"}, "final_quality_score": 6.0, "processing_time": 9.0, "retry_count": 0}\n')
+        
+        # 應該能夠處理一般異常並繼續載入有效的記錄
+        successful_records = recovery_manager.load_successful_records()
+        
+        # 應該只載入有效的記錄，跳過導致異常的記錄
+        assert len(successful_records) == 1  # 只有 test_001
+        assert successful_records[0].original_record.id == "test_001"
+
     def test_load_successful_records_file_not_exists(self, recovery_manager):
         """測試載入成功記錄時文件不存在的情況"""
         # 確保文件不存在
@@ -846,3 +862,347 @@ class TestRecoveryManager:
         # 應該返回空列表
         successful_records = recovery_manager.load_successful_records()
         assert successful_records == []
+
+
+class TestRecordCompletenessWarnings:
+    """測試記錄完整性檢查的警告訊息"""
+
+    @pytest.fixture
+    def recovery_manager(self, tmp_path):
+        """創建恢復管理器實例"""
+        return RecoveryManager(str(tmp_path))
+    
+    def test_is_record_complete_warning_messages_missing_basic_fields(self, recovery_manager, caplog):
+        """測試缺少基本欄位時的警告訊息"""
+        import logging
+        
+        # 設置日誌級別
+        caplog.set_level(logging.WARNING)
+        
+        # 測試缺少 'id' 欄位
+        record_no_id = {
+            "original": {"question": "Q", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0
+        }
+        
+        result = recovery_manager._is_record_complete(record_no_id)
+        assert result == False
+        
+        # 檢查警告訊息
+        assert any("missing required field: id" in record.message for record in caplog.records)
+
+    def test_is_record_complete_warning_messages_missing_original_fields(self, recovery_manager, caplog):
+        """測試缺少 original 欄位時的警告訊息"""
+        import logging
+        
+        caplog.set_level(logging.WARNING)
+        
+        # 測試缺少 original.question
+        record_missing_question = {
+            "id": "test_001",
+            "original": {"answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0
+        }
+        
+        result = recovery_manager._is_record_complete(record_missing_question)
+        assert result == False
+        
+        # 檢查警告訊息
+        assert any("missing original.question" in record.message for record in caplog.records)
+
+    def test_is_record_complete_warning_messages_empty_original_fields(self, recovery_manager, caplog):
+        """測試 original 欄位為空時的警告訊息"""
+        import logging
+        
+        caplog.set_level(logging.WARNING)
+        
+        # 測試空的 original.question
+        record_empty_question = {
+            "id": "test_001",
+            "original": {"question": "", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0
+        }
+        
+        result = recovery_manager._is_record_complete(record_empty_question)
+        assert result == False
+        
+        # 檢查警告訊息
+        assert any("has empty original.question" in record.message for record in caplog.records)
+
+    def test_is_record_complete_warning_messages_missing_translation_fields(self, recovery_manager, caplog):
+        """測試缺少翻譯欄位時的警告訊息"""
+        import logging
+        
+        caplog.set_level(logging.WARNING)
+        
+        # 測試缺少 translation.question
+        record_missing_trans_question = {
+            "id": "test_001",
+            "original": {"question": "Q", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0,
+            "translation": {"answer": "TA", "strategy": "test", "terminology_notes": [], "timestamp": 123456789},
+            "original_qa": {"question": "Q", "answer": "A", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8},
+            "translated_qa": {"question": "TQ", "answer": "TA", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}
+        }
+        
+        result = recovery_manager._is_record_complete(record_missing_trans_question)
+        assert result == False
+        
+        # 檢查警告訊息
+        assert any("missing translation.question" in record.message for record in caplog.records)
+
+    def test_is_record_complete_warning_messages_empty_translation_fields(self, recovery_manager, caplog):
+        """測試翻譯欄位為空時的警告訊息"""
+        import logging
+        
+        caplog.set_level(logging.WARNING)
+        
+        # 測試空的 translation.question
+        record_empty_trans_question = {
+            "id": "test_001",
+            "original": {"question": "Q", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0,
+            "translation": {"question": "", "answer": "TA", "strategy": "test", "terminology_notes": [], "timestamp": 123456789},
+            "original_qa": {"question": "Q", "answer": "A", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8},
+            "translated_qa": {"question": "TQ", "answer": "TA", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}
+        }
+        
+        result = recovery_manager._is_record_complete(record_empty_trans_question)
+        assert result == False
+        
+        # 檢查警告訊息
+        assert any("has empty translation.question" in record.message for record in caplog.records)
+
+    def test_is_record_complete_warning_messages_invalid_numeric_values(self, recovery_manager, caplog):
+        """測試無效數值時的警告訊息"""
+        import logging
+        
+        caplog.set_level(logging.WARNING)
+        
+        # 測試無效的 final_quality_score (負數)
+        record_invalid_quality = {
+            "id": "test_001",
+            "original": {"question": "Q", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": -1.0,  # 無效
+            "processing_time": 10.0,
+            "retry_count": 0,
+            "translation": {"question": "TQ", "answer": "TA", "strategy": "test", "terminology_notes": [], "timestamp": 123456789},
+            "original_qa": {"question": "Q", "answer": "A", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8},
+            "translated_qa": {"question": "TQ", "answer": "TA", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}
+        }
+        
+        result = recovery_manager._is_record_complete(record_invalid_quality)
+        assert result == False
+        
+        # 檢查警告訊息
+        assert any("has invalid final_quality_score" in record.message for record in caplog.records)
+
+    def test_is_record_complete_warning_messages_invalid_timestamp(self, recovery_manager, caplog):
+        """測試無效時間戳時的警告訊息"""
+        import logging
+        
+        caplog.set_level(logging.WARNING)
+        
+        # 測試空的時間戳
+        record_empty_timestamp = {
+            "id": "test_001",
+            "original": {"question": "Q", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0,
+            "translation": {"question": "TQ", "answer": "TA", "strategy": "test", "terminology_notes": [], "timestamp": ""},
+            "original_qa": {"question": "Q", "answer": "A", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8},
+            "translated_qa": {"question": "TQ", "answer": "TA", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}
+        }
+        
+        result = recovery_manager._is_record_complete(record_empty_timestamp)
+        assert result == False
+        
+        # 檢查警告訊息
+        assert any("has invalid translation.timestamp" in record.message for record in caplog.records)
+
+    def test_is_record_complete_warning_messages_missing_original_qa(self, recovery_manager, caplog):
+        """測試缺少 original_qa 欄位時的警告訊息"""
+        import logging
+        
+        caplog.set_level(logging.WARNING)
+        
+        # 測試缺少 original_qa 欄位
+        record_missing_original_qa = {
+            "id": "test_001",
+            "original": {"question": "Q", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0,
+            "translation": {"question": "TQ", "answer": "TA", "strategy": "test", "terminology_notes": [], "timestamp": 123456789},
+            "translated_qa": {"question": "TQ", "answer": "TA", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}
+        }
+        
+        result = recovery_manager._is_record_complete(record_missing_original_qa)
+        assert result == False
+        
+        # 檢查警告訊息
+        assert any("missing original_qa" in record.message for record in caplog.records)
+
+    def test_is_record_complete_warning_messages_missing_original_qa_question(self, recovery_manager, caplog):
+        """測試缺少 original_qa.question 欄位時的警告訊息"""
+        import logging
+        
+        caplog.set_level(logging.WARNING)
+        
+        # 測試缺少 original_qa.question
+        record_missing_question = {
+            "id": "test_001",
+            "original": {"question": "Q", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0,
+            "translation": {"question": "TQ", "answer": "TA", "strategy": "test", "terminology_notes": [], "timestamp": 123456789},
+            "original_qa": {"answer": "A", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8},
+            "translated_qa": {"question": "TQ", "answer": "TA", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}
+        }
+        
+        result = recovery_manager._is_record_complete(record_missing_question)
+        assert result == False
+        
+        # 檢查警告訊息
+        assert any("missing original_qa.question" in record.message for record in caplog.records)
+
+    def test_is_record_complete_warning_messages_empty_original_qa_question(self, recovery_manager, caplog):
+        """測試 original_qa.question 為空時的警告訊息"""
+        import logging
+        
+        caplog.set_level(logging.WARNING)
+        
+        # 測試空的 original_qa.question
+        record_empty_question = {
+            "id": "test_001",
+            "original": {"question": "Q", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0,
+            "translation": {"question": "TQ", "answer": "TA", "strategy": "test", "terminology_notes": [], "timestamp": 123456789},
+            "original_qa": {"question": "", "answer": "A", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8},
+            "translated_qa": {"question": "TQ", "answer": "TA", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}
+        }
+        
+        result = recovery_manager._is_record_complete(record_empty_question)
+        assert result == False
+        
+        # 檢查警告訊息
+        assert any("has empty original_qa.question" in record.message for record in caplog.records)
+
+    def test_is_record_complete_warning_messages_missing_translation_question(self, recovery_manager, caplog):
+        """測試缺少 translation.question 欄位時的警告訊息"""
+        import logging
+        
+        caplog.set_level(logging.WARNING)
+        
+        # 測試缺少 translation.question
+        record_missing_question = {
+            "id": "test_001",
+            "original": {"question": "Q", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0,
+            "translation": {"answer": "TA", "strategy": "test", "terminology_notes": [], "timestamp": 123456789},
+            "original_qa": {"question": "Q", "answer": "A", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8},
+            "translated_qa": {"question": "TQ", "answer": "TA", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}
+        }
+        
+        result = recovery_manager._is_record_complete(record_missing_question)
+        assert result == False
+        
+        # 檢查警告訊息
+        assert any("missing translation.question" in record.message for record in caplog.records)
+
+    def test_is_record_complete_warning_messages_empty_translation_question(self, recovery_manager, caplog):
+        """測試 translation.question 為空時的警告訊息"""
+        import logging
+        
+        caplog.set_level(logging.WARNING)
+        
+        # 測試空的 translation.question
+        record_empty_question = {
+            "id": "test_001",
+            "original": {"question": "Q", "answer": "A", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"},
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0,
+            "translation": {"question": "", "answer": "TA", "strategy": "test", "terminology_notes": [], "timestamp": 123456789},
+            "original_qa": {"question": "Q", "answer": "A", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8},
+            "translated_qa": {"question": "TQ", "answer": "TA", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}
+        }
+        
+        result = recovery_manager._is_record_complete(record_empty_question)
+        assert result == False
+        
+        # 檢查警告訊息
+        assert any("has empty translation.question" in record.message for record in caplog.records)
+
+
+class TestGetProcessedStatusJSONErrorHandling:
+    """測試 get_processed_status 的 JSON 錯誤處理"""
+
+    @pytest.fixture
+    def recovery_manager(self, tmp_path):
+        """創建恢復管理器實例"""
+        return RecoveryManager(str(tmp_path))
+    
+    def test_get_processed_status_json_decode_error_in_loop(self, recovery_manager, caplog):
+        """測試處理狀態獲取時迴圈中的 JSON 解析錯誤"""
+        import logging
+        
+        caplog.set_level(logging.WARNING)
+        
+        # 創建包含無效 JSON 的文件（在有效記錄之間）
+        with open(recovery_manager.results_file, "w", encoding="utf-8") as f:
+            f.write('{"id": "valid_001", "processing_status": "completed", "original": {"question": "Q1", "answer": "A1", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"}, "final_quality_score": 8.0, "processing_time": 10.0, "retry_count": 0, "translation": {"question": "TQ1", "answer": "TA1", "strategy": "test", "terminology_notes": [], "timestamp": 123456789}, "original_qa": {"question": "Q1", "answer": "A1", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}, "translated_qa": {"question": "TQ1", "answer": "TA1", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}}\n')
+            f.write('{"id": "invalid", "broken": json syntax here}\n')  # 無效 JSON
+            f.write('{"id": "valid_002", "processing_status": "failed", "original": {"question": "Q2", "answer": "A2", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"}, "final_quality_score": 0.0, "processing_time": 1.0, "retry_count": 1}\n')
+        
+        # 應該能夠處理並繼續處理其他記錄
+        status = recovery_manager.get_processed_status()
+        
+        # 應該只統計有效的記錄，跳過無效的
+        assert "valid_001" in status["successful"]
+        assert "valid_002" in status["failed"]
+        assert status["total"] == 2  # 不包含無效記錄
+
+    def test_get_processed_status_json_decode_error_syntax_error(self, recovery_manager):
+        """測試獲取處理狀態時處理真正無效的 JSON 語法錯誤"""
+        # 創建包含真正無效 JSON 語法的文件
+        with open(recovery_manager.results_file, "w", encoding="utf-8") as f:
+            f.write('{"id": "valid_001", "processing_status": "completed", "original": {"question": "Q1", "answer": "A1", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"}, "final_quality_score": 8.0, "processing_time": 10.0, "retry_count": 0, "translation": {"question": "TQ1", "answer": "TA1", "strategy": "test", "terminology_notes": [], "timestamp": 123456789}, "original_qa": {"question": "Q1", "answer": "A1", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}, "translated_qa": {"question": "TQ1", "answer": "TA1", "execution_time": 5.0, "reasoning_steps": [], "confidence_score": 0.8}}\n')
+            f.write('{"incomplete": json, "missing": quotes}\n')  # 真正無效的 JSON 語法
+            f.write('{"id": "valid_002", "processing_status": "failed", "original": {"question": "Q2", "answer": "A2", "source_dataset": "test", "metadata": {}, "complexity_level": "simple"}, "final_quality_score": 0.0, "processing_time": 1.0, "retry_count": 1}\n')
+        
+        # 應該能夠處理並跳過無效 JSON
+        status = recovery_manager.get_processed_status()
+        
+        # 應該只統計有效的記錄
+        assert "valid_001" in status["successful"]
+        assert "valid_002" in status["failed"]
+        assert status["total"] == 2

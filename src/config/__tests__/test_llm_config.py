@@ -8,7 +8,8 @@ LLM 配置測試模組
 import sys
 from pathlib import Path
 from typing import Dict, Optional
-from unittest.mock import patch
+from unittest.mock import patch, Mock
+import json
 
 import pytest
 
@@ -521,3 +522,157 @@ class TestConfigurationIntegration:
         for model_name, pricing in MODEL_PRICING.items():
             assert "input_price_per_1k" in pricing
             assert "output_price_per_1k" in pricing
+
+
+class TestAgentModelJSONLoading:
+    """測試 Agent 模型 JSON 載入功能"""
+
+    def test_load_agent_models_from_json_success(self, capsys, tmp_path) -> None:
+        """測試成功載入 agent_models.json"""
+        from src.config.llm_config import _load_agent_models_from_json
+        
+        # 創建測試數據
+        test_data = {
+            "agents": {
+                "test_agent": {
+                    "primary_model": "gpt-4o",
+                    "fallback_models": ["claude-4-sonnet"],
+                    "model_parameters": {
+                        "temperature": 0.2,
+                        "max_tokens": 2048
+                    }
+                }
+            }
+        }
+        
+        # 創建臨時配置文件
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        agent_models_file = config_dir / "agent_models.json"
+        
+        # 寫入測試數據
+        with open(agent_models_file, 'w', encoding='utf-8') as f:
+            json.dump(test_data, f, ensure_ascii=False)
+        
+        # Mock the __file__ path to point to our temp config directory
+        with patch('src.config.llm_config.Path') as mock_path_class:
+            # Mock Path(__file__) to return a path in our temp directory
+            mock_file_path = Mock()
+            mock_file_path.parent = config_dir
+            mock_path_class.return_value = mock_file_path
+            
+            # 測試載入
+            result = _load_agent_models_from_json()
+            
+            # 檢查結果
+            assert "test_agent" in result
+            assert result["test_agent"]["primary_model"] == "gpt-4o"
+            assert result["test_agent"]["fallback_model"] == "claude-4-sonnet"
+            assert result["test_agent"]["temperature"] == 0.2
+            assert result["test_agent"]["max_tokens"] == 2048
+            
+            # 檢查打印輸出
+            captured = capsys.readouterr()
+            assert "Loaded agent configurations from agent_models.json: ['test_agent']" in captured.out
+
+    def test_load_agent_models_from_json_file_not_found(self, capsys) -> None:
+        """測試 agent_models.json 文件不存在的情況"""
+        from src.config.llm_config import _load_agent_models_from_json
+
+        with patch('src.config.llm_config.Path') as mock_path:
+            # Mock 文件不存在
+            mock_file = Mock()
+            mock_file.exists.return_value = False
+            mock_path.return_value.parent.__truediv__ = lambda self, x: mock_file
+
+            result = _load_agent_models_from_json()
+
+            # 應該返回空字典
+            assert result == {}
+
+            # 檢查警告輸出
+            captured = capsys.readouterr()
+            assert "Warning: agent_models.json not found" in captured.out
+
+    def test_load_agent_models_from_json_exception_handling(self, capsys) -> None:
+        """測試載入時發生異常的處理"""
+        from src.config.llm_config import _load_agent_models_from_json
+
+        with patch('src.config.llm_config.Path') as mock_path:
+            # Mock 讓 json.load 拋出異常
+            mock_file = Mock()
+            mock_file.exists.return_value = True
+            mock_path.return_value.parent.__truediv__ = lambda self, x: mock_file
+
+            with patch('builtins.open') as mock_open:
+                mock_open.return_value.__enter__.return_value.read.side_effect = json.JSONDecodeError("Test error", "", 0)
+
+                result = _load_agent_models_from_json()
+
+                # 應該返回空字典
+                assert result == {}
+
+                # 檢查錯誤輸出
+                captured = capsys.readouterr()
+                assert "Error loading agent_models.json:" in captured.out
+
+
+class TestLLMConfigFallback:
+    """測試 LLM 配置回退邏輯"""
+
+    def test_get_llm_config_fallback_to_default(self) -> None:
+        """測試 get_llm_config 回退到預設配置"""
+        from src.config.llm_config import get_llm_config
+
+        # 測試不存在的模型
+        config = get_llm_config("non_existent_model")
+
+        # 應該返回 gpt-4o 的配置作為預設
+        expected_config = DEFAULT_LLM_CONFIGS["gpt-4o"]
+        assert config == expected_config
+        assert config["model_name"] == "gpt-4o"
+
+    def test_get_llm_config_default_parameter(self) -> None:
+        """測試 get_llm_config 的預設參數"""
+        from src.config.llm_config import get_llm_config
+
+        # 不傳參數應該使用預設值
+        config = get_llm_config()
+
+        # 應該返回 gpt-4o 的配置
+        expected_config = DEFAULT_LLM_CONFIGS["gpt-4o"]
+        assert config == expected_config
+        assert config["model_name"] == "gpt-4o"
+
+    def test_get_agent_config_non_existent_agent(self) -> None:
+        """測試取得不存在的 Agent 配置"""
+        from src.config.llm_config import get_agent_config
+
+        # 測試不存在的 agent
+        config = get_agent_config("non_existent_agent")
+
+        # 應該返回 None
+        assert config is None
+
+    def test_get_agent_config_fallback_to_default_configs(self) -> None:
+        """測試 get_agent_config 回退到預設配置"""
+        from src.config.llm_config import get_agent_config
+
+        # Mock JSON loading to return empty dict to force fallback to default configs
+        with patch('src.config.llm_config._load_agent_models_from_json', return_value={}):
+            # Test with an existing agent
+            config = get_agent_config("analyzer_designer")
+            assert config is not None
+            assert config == AGENT_MODEL_CONFIGS["analyzer_designer"]
+            assert config["primary_model"] == "gpt-4o"
+
+    def test_get_agent_config_json_loading_failure_fallback(self) -> None:
+        """測試 JSON 載入失敗時的回退"""
+        from src.config.llm_config import get_agent_config
+
+        # Mock JSON loading to return None (simulating failure)
+        with patch('src.config.llm_config._load_agent_models_from_json', return_value=None):
+            # Should fallback to default configs
+            config = get_agent_config("analyzer_designer")
+            assert config is not None
+            assert config == AGENT_MODEL_CONFIGS["analyzer_designer"]

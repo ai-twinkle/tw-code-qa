@@ -156,3 +156,275 @@ class TestRecoveryManager:
         assert "成功處理: 1 筆" in captured.out
         assert "尚未處理: 2 筆" in captured.out
         assert "需要重跑: 2 筆" in captured.out
+
+    def test_incomplete_record_detection(self, recovery_manager):
+        """測試不完整記錄檢測"""
+        # 創建不完整記錄 - 缺少翻譯答案
+        incomplete_record_data = {
+            "id": "incomplete_001",
+            "original": {
+                "question": "Test question",
+                "answer": "Test answer",
+                "source_dataset": "test",
+                "metadata": {},
+                "complexity_level": "simple"
+            },
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0,
+            "translation": {
+                "question": "測試問題",
+                "answer": "",  # 空答案
+                "strategy": "test",
+                "terminology_notes": [],
+                "timestamp": 123456789
+            },
+            "original_qa": {
+                "question": "Test question",
+                "answer": "Test answer",
+                "execution_time": 5.0,
+                "reasoning_steps": [],
+                "confidence_score": 0.8
+            },
+            "translated_qa": {
+                "question": "測試問題",
+                "answer": "",  # 空答案
+                "execution_time": 5.0,
+                "reasoning_steps": [],
+                "confidence_score": 0.8
+            }
+        }
+        
+        # 手動寫入不完整記錄
+        with open(recovery_manager.results_file, "w", encoding="utf-8") as f:
+            json.dump(incomplete_record_data, f, ensure_ascii=False)
+            f.write("\n")
+        
+        # 檢查狀態 - 應該檢測到這是失敗記錄
+        status = recovery_manager.get_processed_status()
+        assert len(status["successful"]) == 0
+        assert "incomplete_001" in status["failed"]
+        assert status["total"] == 1
+
+    def test_missing_fields_detection(self, recovery_manager):
+        """測試缺失欄位檢測"""
+        # 創建缺失必要欄位的記錄
+        incomplete_record_data = {
+            "id": "missing_fields_001",
+            "processing_status": "completed",
+            # 缺少 'original' 欄位
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0
+        }
+        
+        # 手動寫入不完整記錄
+        with open(recovery_manager.results_file, "w", encoding="utf-8") as f:
+            json.dump(incomplete_record_data, f, ensure_ascii=False)
+            f.write("\n")
+        
+        # 檢查狀態 - 應該檢測到這是失敗記錄
+        status = recovery_manager.get_processed_status()
+        assert len(status["successful"]) == 0
+        assert "missing_fields_001" in status["failed"]
+        assert status["total"] == 1
+
+    def test_mixed_complete_incomplete_records(self, recovery_manager, sample_record):
+        """測試混合完整和不完整記錄"""
+        # 保存完整記錄
+        recovery_manager.save_record(sample_record)
+        
+        # 添加不完整記錄
+        incomplete_record_data = {
+            "id": "incomplete_002",
+            "original": {
+                "question": "Test question 2",
+                "answer": "Test answer 2",
+                "source_dataset": "test",
+                "metadata": {},
+                "complexity_level": "simple"
+            },
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0,
+            "translation": {
+                "question": "測試問題2",
+                "answer": "測試答案2",
+                "strategy": "test",
+                "terminology_notes": [],
+                "timestamp": 123456789
+            },
+            "original_qa": {
+                "question": "Test question 2",
+                "answer": "Test answer 2",
+                "execution_time": 5.0,
+                "reasoning_steps": [],
+                "confidence_score": 0.8
+            }
+            # 缺少 translated_qa 欄位
+        }
+        
+        # 追加不完整記錄
+        with open(recovery_manager.results_file, "a", encoding="utf-8") as f:
+            json.dump(incomplete_record_data, f, ensure_ascii=False)
+            f.write("\n")
+        
+        # 檢查狀態
+        status = recovery_manager.get_processed_status()
+        assert "test_001" in status["successful"]  # 完整記錄
+        assert "incomplete_002" in status["failed"]  # 不完整記錄
+        assert len(status["successful"]) == 1
+        assert len(status["failed"]) == 1
+        assert status["total"] == 2
+
+    def test_record_completeness_validation(self, recovery_manager):
+        """測試記錄完整性驗證方法"""
+        # 測試完整記錄
+        complete_record = {
+            "id": "complete_001",
+            "original": {
+                "question": "Test question",
+                "answer": "Test answer",
+                "source_dataset": "test",
+                "metadata": {},
+                "complexity_level": "simple"
+            },
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0,
+            "translation": {
+                "question": "測試問題",
+                "answer": "測試答案",
+                "strategy": "test",
+                "terminology_notes": [],
+                "timestamp": 123456789
+            },
+            "original_qa": {
+                "question": "Test question",
+                "answer": "Complete answer",
+                "execution_time": 5.0,
+                "reasoning_steps": [],
+                "confidence_score": 0.8
+            },
+            "translated_qa": {
+                "question": "測試問題",
+                "answer": "完整答案",
+                "execution_time": 5.0,
+                "reasoning_steps": [],
+                "confidence_score": 0.8
+            }
+        }
+        
+        # 測試不完整記錄（空答案）
+        incomplete_record = {
+            "id": "incomplete_001",
+            "original": {
+                "question": "Test question",
+                "answer": "Test answer",
+                "source_dataset": "test",
+                "metadata": {},
+                "complexity_level": "simple"
+            },
+            "processing_status": "completed",
+            "final_quality_score": 8.5,
+            "processing_time": 10.0,
+            "retry_count": 0,
+            "translation": {
+                "question": "測試問題",
+                "answer": "",  # 空答案
+                "strategy": "test",
+                "terminology_notes": [],
+                "timestamp": 123456789
+            },
+            "original_qa": {
+                "question": "Test question",
+                "answer": "Complete answer",
+                "execution_time": 5.0,
+                "reasoning_steps": [],
+                "confidence_score": 0.8
+            },
+            "translated_qa": {
+                "question": "測試問題",
+                "answer": "",  # 空答案
+                "execution_time": 5.0,
+                "reasoning_steps": [],
+                "confidence_score": 0.8
+            }
+        }
+        
+        # 測試缺失欄位記錄
+        missing_field_record = {
+            "id": "missing_001",
+            "processing_status": "completed",
+            # 缺少 'original' 欄位
+        }
+        
+        # 驗證完整性
+        assert recovery_manager._is_record_complete(complete_record) == True
+        assert recovery_manager._is_record_complete(incomplete_record) == False
+        assert recovery_manager._is_record_complete(missing_field_record) == False
+    
+    def test_save_record_replaces_existing(self, recovery_manager):
+        """測試保存記錄會替換現有的同ID記錄"""
+        # 創建第一個測試記錄
+        record1 = ProcessedRecord(
+            original_record=OriginalRecord(
+                id="test_replace",
+                question="Test question",
+                answer="Test answer",
+                source_dataset="test",
+                metadata={},
+                complexity_level=ComplexityLevel.SIMPLE
+            ),
+            translation_result=None,
+            original_qa_result=None,
+            translated_qa_result=None,
+            processing_status=ProcessingStatus.FAILED,
+            final_quality_score=5.0,
+            processing_time=10.0,
+            retry_count=1
+        )
+        
+        # 保存第一個記錄
+        success1 = recovery_manager.save_record(record1)
+        assert success1 is True
+        
+        # 創建第二個相同ID但不同內容的記錄
+        record2 = ProcessedRecord(
+            original_record=OriginalRecord(
+                id="test_replace",  # 相同ID
+                question="Test question",
+                answer="Test answer",
+                source_dataset="test",
+                metadata={},
+                complexity_level=ComplexityLevel.SIMPLE
+            ),
+            translation_result=None,
+            original_qa_result=None,
+            translated_qa_result=None,
+            processing_status=ProcessingStatus.COMPLETED,  # 不同狀態
+            final_quality_score=8.0,  # 不同分數
+            processing_time=15.0,
+            retry_count=2
+        )
+        
+        # 保存第二個記錄（應該替換第一個）
+        success2 = recovery_manager.save_record(record2)
+        assert success2 is True
+        
+        # 檢查文件內容
+        with open(recovery_manager.results_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        
+        # 應該只有一行記錄
+        assert len(lines) == 1
+        
+        # 檢查記錄內容是第二個記錄的內容
+        record_data = json.loads(lines[0])
+        assert record_data["id"] == "test_replace"
+        assert record_data["processing_status"] == "completed"
+        assert record_data["final_quality_score"] == 8.0
+        assert record_data["retry_count"] == 2

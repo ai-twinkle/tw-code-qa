@@ -37,7 +37,7 @@ class RecoveryManager:
     
     def save_record(self, record: ProcessedRecord) -> bool:
         """
-        保存單筆記錄（追加模式）
+        保存單筆記錄（會替換同ID的舊記錄）
         
         Args:
             record: 處理後的記錄
@@ -48,10 +48,28 @@ class RecoveryManager:
         try:
             # 使用格式轉換器將記錄轉換為字典
             record_dict = self.format_converter.processed_record_to_dict(record)
+            record_id = record.original_record.id
             
-            # 追加到 JSONL 文件
-            with open(self.results_file, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record_dict, ensure_ascii=False) + "\n")
+            # 讀取現有記錄
+            existing_records = []
+            if self.results_file.exists():
+                with open(self.results_file, "r", encoding="utf-8") as f:
+                    for line in f:
+                        try:
+                            existing_record = json.loads(line.strip())
+                            # 如果不是同一個ID，保留現有記錄
+                            if existing_record.get("id") != record_id:
+                                existing_records.append(existing_record)
+                        except json.JSONDecodeError:
+                            continue
+            
+            # 添加新記錄
+            existing_records.append(record_dict)
+            
+            # 重寫文件
+            with open(self.results_file, "w", encoding="utf-8") as f:
+                for record_entry in existing_records:
+                    f.write(json.dumps(record_entry, ensure_ascii=False) + "\n")
             
             return True
             
@@ -86,9 +104,15 @@ class RecoveryManager:
                         
                         if record_id and status:
                             if status == ProcessingStatus.COMPLETED.value:
-                                successful_ids.add(record_id)
-                                # 如果之前失敗過，現在成功了，從失敗列表移除
-                                failed_ids.discard(record_id)
+                                # 進一步檢查記錄完整性
+                                if self._is_record_complete(record):
+                                    successful_ids.add(record_id)
+                                    # 如果之前失敗過，現在成功了，從失敗列表移除
+                                    failed_ids.discard(record_id)
+                                else:
+                                    # 記錄不完整，標記為失敗
+                                    failed_ids.add(record_id)
+                                    successful_ids.discard(record_id)
                             else:
                                 # 只有在不是成功狀態時才加入失敗列表
                                 if record_id not in successful_ids:
@@ -105,6 +129,124 @@ class RecoveryManager:
             "failed": failed_ids,
             "total": len(successful_ids) + len(failed_ids)
         }
+    
+    def _is_record_complete(self, record: Dict[str, Any]) -> bool:
+        """
+        檢查記錄是否完整
+        
+        Args:
+            record: 記錄字典
+            
+        Returns:
+            記錄是否完整
+        """
+        try:
+            # 檢查基本必要欄位
+            basic_required_fields = ['id', 'original', 'processing_status', 'final_quality_score', 'processing_time', 'retry_count']
+            for field in basic_required_fields:
+                if field not in record:
+                    logger.warning(f"Record {record.get('id', 'unknown')} missing required field: {field}")
+                    return False
+            
+            # 檢查 original 欄位完整性
+            original = record.get('original', {})
+            original_required = ['question', 'answer', 'source_dataset', 'metadata', 'complexity_level']
+            for field in original_required:
+                if field not in original:
+                    logger.warning(f"Record {record['id']} missing original.{field}")
+                    return False
+                # 檢查非空
+                if field in ['question', 'answer'] and not original[field]:
+                    logger.warning(f"Record {record['id']} has empty original.{field}")
+                    return False
+            
+            # 如果狀態是 completed，檢查更詳細的完整性
+            if record.get('processing_status') == ProcessingStatus.COMPLETED.value:
+                
+                # 檢查翻譯結果完整性
+                if 'translation' not in record:
+                    logger.warning(f"Record {record['id']} missing translation")
+                    return False
+                
+                translation = record['translation']
+                translation_required = ['question', 'answer', 'strategy', 'terminology_notes', 'timestamp']
+                for field in translation_required:
+                    if field not in translation:
+                        logger.warning(f"Record {record['id']} missing translation.{field}")
+                        return False
+                    # 檢查關鍵欄位非空
+                    if field in ['question', 'answer'] and not translation[field]:
+                        logger.warning(f"Record {record['id']} has empty translation.{field}")
+                        return False
+                
+                # 檢查 original_qa 結果完整性
+                if 'original_qa' not in record:
+                    logger.warning(f"Record {record['id']} missing original_qa")
+                    return False
+                
+                original_qa = record['original_qa']
+                original_qa_required = ['question', 'answer', 'execution_time', 'reasoning_steps', 'confidence_score']
+                for field in original_qa_required:
+                    if field not in original_qa:
+                        logger.warning(f"Record {record['id']} missing original_qa.{field}")
+                        return False
+                    # 檢查關鍵欄位非空
+                    if field in ['question', 'answer'] and not original_qa[field]:
+                        logger.warning(f"Record {record['id']} has empty original_qa.{field}")
+                        return False
+                
+                # 檢查 translated_qa 結果完整性
+                if 'translated_qa' not in record:
+                    logger.warning(f"Record {record['id']} missing translated_qa")
+                    return False
+                
+                translated_qa = record['translated_qa']
+                translated_qa_required = ['question', 'answer', 'execution_time', 'reasoning_steps', 'confidence_score']
+                for field in translated_qa_required:
+                    if field not in translated_qa:
+                        logger.warning(f"Record {record['id']} missing translated_qa.{field}")
+                        return False
+                    # 檢查關鍵欄位非空
+                    if field in ['question', 'answer'] and not translated_qa[field]:
+                        logger.warning(f"Record {record['id']} has empty translated_qa.{field}")
+                        return False
+                
+                # 檢查數值欄位的合理性
+                if not isinstance(record.get('final_quality_score'), (int, float)) or record['final_quality_score'] < 0:
+                    logger.warning(f"Record {record['id']} has invalid final_quality_score")
+                    return False
+                
+                if not isinstance(record.get('processing_time'), (int, float)) or record['processing_time'] < 0:
+                    logger.warning(f"Record {record['id']} has invalid processing_time")
+                    return False
+                
+                if not isinstance(record.get('retry_count'), int) or record['retry_count'] < 0:
+                    logger.warning(f"Record {record['id']} has invalid retry_count")
+                    return False
+                
+                # 檢查執行時間欄位
+                for qa_type in ['original_qa', 'translated_qa']:
+                    qa_data = record[qa_type]
+                    if not isinstance(qa_data.get('execution_time'), (int, float)) or qa_data['execution_time'] < 0:
+                        logger.warning(f"Record {record['id']} has invalid {qa_type}.execution_time")
+                        return False
+                    
+                    if not isinstance(qa_data.get('confidence_score'), (int, float)) or not (0 <= qa_data['confidence_score'] <= 1):
+                        logger.warning(f"Record {record['id']} has invalid {qa_type}.confidence_score")
+                        return False
+                
+                # 檢查時間戳 (支援數字和字串格式)
+                timestamp = translation.get('timestamp')
+                if not timestamp or (not isinstance(timestamp, (int, float, str)) or 
+                                   (isinstance(timestamp, str) and timestamp.strip() == "")):
+                    logger.warning(f"Record {record['id']} has invalid translation.timestamp")
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error checking record completeness for {record.get('id', 'unknown')}: {e}")
+            return False
     
     def find_missing_and_failed(self, all_record_ids: List[str]) -> Dict[str, Set[str]]:
         """

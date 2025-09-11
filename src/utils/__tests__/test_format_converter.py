@@ -143,7 +143,7 @@ class TestDataFormatConverter:
         
         # 測試私有方法（如果存在）
         if hasattr(converter, '_processed_record_to_dict'):
-            result = converter._processed_record_to_dict(record)
+            result = converter.processed_record_to_dict(record)
             assert isinstance(result, dict)
             assert "original_record" in result or "id" in result  # 基本驗證
 
@@ -297,7 +297,7 @@ class TestDataFormatConverter:
         """測試完整記錄轉字典"""
         record = self.create_test_processed_record("test_record")
         
-        result = converter._processed_record_to_dict(record)
+        result = converter.processed_record_to_dict(record)
         
         # 驗證基本結構
         assert result['id'] == "test_record"
@@ -331,7 +331,7 @@ class TestDataFormatConverter:
             retry_count=0
         )
         
-        result = converter._processed_record_to_dict(minimal_record)
+        result = converter.processed_record_to_dict(minimal_record)
         
         # 驗證基本結構存在
         assert result['id'] == "minimal_record"

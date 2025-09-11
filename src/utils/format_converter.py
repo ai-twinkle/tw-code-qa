@@ -67,7 +67,7 @@ class DataFormatConverter:
             with open(output_path, 'w', encoding='utf-8') as f:
                 for record in records:
                     # 轉換為字典格式
-                    record_dict = self._processed_record_to_dict(record)
+                    record_dict = self.processed_record_to_dict(record)
                     # 寫入 JSONL
                     f.write(json.dumps(record_dict, ensure_ascii=False) + '\n')
             
@@ -134,7 +134,7 @@ class DataFormatConverter:
             self.logger.info(f"Converting {len(records)} records to Arrow: {output_path}")
             
             # 轉換為字典列表
-            data_dicts = [self._processed_record_to_dict(record) for record in records]
+            data_dicts = [self.processed_record_to_dict(record) for record in records]
             
             # 創建 Arrow Table
             table = pa.Table.from_pylist(data_dicts)
@@ -152,7 +152,7 @@ class DataFormatConverter:
             self.logger.error(f"Failed to convert records to Arrow: {e}")
             raise FormatConversionError(f"Arrow conversion failed: {e}")
     
-    def _processed_record_to_dict(self, record: ProcessedRecord) -> Dict[str, Any]:
+    def processed_record_to_dict(self, record: ProcessedRecord) -> Dict[str, Any]:
         """
         將處理後記錄轉換為字典
         

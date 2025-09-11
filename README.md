@@ -46,32 +46,42 @@ First, download the dataset:
 uv run python scripts/download_dataset.py
 ```
 
-Then, run the main script with the dataset path:
+Then, run the main script with the dataset path and **always specify output directory** to avoid mixing different datasets:
 
-```bash
-uv run python main.py --dataset-path data/opencoder_dataset_educational_instruct --dataset-type opencoder
-```
+### Processing Different Datasets
 
-Other examples:
+**Important**: Always specify `--output-dir` for each dataset to prevent mixing results from different datasets.
 
-- Process OpenCoder educational instruct dataset:
+- **Educational Instruct Dataset**:
   ```bash
-  uv run python main.py --dataset-path data/opencoder_dataset_educational_instruct --dataset-type opencoder
+  uv run python main.py --dataset-path data/opencoder_dataset_educational_instruct --dataset-type opencoder --output-dir output/educational_instruct
   ```
 
-- Specify output directory and batch size:
+- **Evol Instruct Dataset**:
   ```bash
-  uv run python main.py --dataset-path data/opencoder_dataset_evol_instruct --output-dir output/evol --batch-size 50
+  uv run python main.py --dataset-path data/opencoder_dataset_evol_instruct --dataset-type opencoder --output-dir output/evol_instruct
   ```
+
+- **McEval Instruct Dataset**:
+  ```bash
+  uv run python main.py --dataset-path data/opencoder_dataset_mceval_instruct --dataset-type opencoder --output-dir output/mceval_instruct
+  ```
+
+- **Package Instruct Dataset**:
+  ```bash
+  uv run python main.py --dataset-path data/opencoder_dataset_package_instruct --dataset-type opencoder --output-dir output/package_instruct
+  ```
+
+### Other Usage Examples
 
 - Test mode (process only first 10 records):
   ```bash
-  uv run python main.py --dataset-path data/sample --max-records 10 --environment development
+  uv run python main.py --dataset-path data/opencoder_dataset_educational_instruct --output-dir output/test_run --max-records 10 --environment development
   ```
 
-- Production mode:
+- Production mode with full processing:
   ```bash
-  uv run python main.py --dataset-path data/opencoder_dataset_package_instruct --environment production --batch-size 200
+  uv run python main.py --dataset-path data/opencoder_dataset_package_instruct --output-dir output/package_instruct --environment production
   ```
 
 ## Features
@@ -79,7 +89,8 @@ Other examples:
 - Dataset conversion for Traditional Chinese Code-QA
 - Multi-agent architecture using LangChain and LangGraph
 - Support for various LLM providers (OpenAI, Anthropic, Google)
-- Batch processing capabilities
+- Real-time processing with immediate save after each record
+- Automatic failure recovery and checkpoint system
 - Environment-specific configurations (development/production)
 
 ## Development

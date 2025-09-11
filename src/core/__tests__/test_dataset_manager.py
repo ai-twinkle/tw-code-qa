@@ -1,564 +1,289 @@
 """
-測試資料集管理器
-Test Dataset Manager
+測試重寫後的 DatasetManager
+Tests for the rewritten DatasetManager
 """
 
 import pytest
-import time
-from unittest.mock import Mock, patch, MagicMock
-from typing import List, Iterator
+import tempfile
+from pathlib import Path
+from unittest.mock import Mock, patch
 
 from src.core.dataset_manager import DatasetManager, DatasetProcessingError
-from src.models.dataset import OriginalRecord, ProcessedRecord, Language, ProcessingStatus, ComplexityLevel, TranslationResult, QAExecutionResult
-from src.services.data_loader import DataLoadError
+from src.models.dataset import OriginalRecord, ProcessedRecord, ProcessingStatus, ComplexityLevel
+from src.models.quality import BatchQualityReport
 
 
 class TestDatasetManager:
     """測試資料集管理器"""
-
+    
     @pytest.fixture
-    def dataset_manager(self) -> DatasetManager:
-        """測試用資料集管理器"""
-        return DatasetManager(output_dir="test_output", batch_size=2)
-
-    def create_test_original_record(self, record_id: str = "test_id") -> OriginalRecord:
-        """創建測試用原始記錄"""
+    def temp_dir(self):
+        """臨時目錄 fixture"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            yield temp_dir
+    
+    @pytest.fixture
+    def dataset_manager(self, temp_dir):
+        """資料集管理器 fixture"""
+        return DatasetManager(output_dir=temp_dir)
+    
+    @pytest.fixture
+    def sample_record(self):
+        """測試記錄 fixture"""
         return OriginalRecord(
-            id=record_id,
-            question="Test question",
-            answer="Test answer",
+            id="test_001",
+            question="What is Python?",
+            answer="Python is a programming language",
             source_dataset="test_dataset",
-            metadata={"tag": "test", "source_index": 0},
+            metadata={},
             complexity_level=ComplexityLevel.SIMPLE
         )
-
-    def create_test_processed_record(self, record_id: str = "test_id") -> ProcessedRecord:
-        """創建測試用處理記錄"""
-        original_record = self.create_test_original_record(record_id)
-        
-        translation_result = TranslationResult(
-            original_record_id=record_id,
-            translated_question="測試問題",
-            translated_answer="測試答案",
-            translation_strategy="direct",
-            terminology_notes=[]
-        )
-        
-        original_qa_result = QAExecutionResult(
-            record_id=record_id,
-            language=Language.ENGLISH,
-            input_question="Test question",
-            generated_answer="Test answer",
-            execution_time=1.0,
-            reasoning_steps=["step1", "step2"]
-        )
-        
-        translated_qa_result = QAExecutionResult(
-            record_id=record_id,
-            language=Language.TRADITIONAL_CHINESE,
-            input_question="測試問題",
-            generated_answer="測試答案",
-            execution_time=1.0,
-            reasoning_steps=["步驟1", "步驟2"]
-        )
-        
-        return ProcessedRecord(
-            original_record=original_record,
-            translation_result=translation_result,
-            original_qa_result=original_qa_result,
-            translated_qa_result=translated_qa_result,
-            processing_status=ProcessingStatus.COMPLETED,
-            final_quality_score=0.85,
-            processing_time=2.5,
-            retry_count=0
-        )
-
-    def test_initialization(self, dataset_manager: DatasetManager) -> None:
+    
+    def test_initialization(self, temp_dir):
         """測試初始化"""
-        assert dataset_manager.batch_size == 2
-        assert dataset_manager.output_dir.name == "test_output"
-        assert dataset_manager.total_processed == 0
-        assert dataset_manager.successful_records == 0
-        assert dataset_manager.failed_records == 0
-
-    def test_load_dataset_success(self, dataset_manager: DatasetManager) -> None:
-        """測試成功載入資料集"""
-        dataset_path = "test_path"
-        dataset_type = "opencoder"
-
-        # 模擬迭代器
-        with patch('src.services.data_loader.DataLoaderFactory.create_loader') as mock_factory:
-            mock_loader = Mock()
-            test_records = [self.create_test_original_record(f"record_{i}") for i in range(3)]
-            mock_loader.load_dataset.return_value = iter(test_records)
-            mock_factory.return_value = mock_loader
-
-            # 測試載入
-            loaded_records = list(dataset_manager.load_dataset(dataset_path, dataset_type))
-
-            # 驗證
-            assert len(loaded_records) == 3
-            mock_factory.assert_called_once_with(dataset_type)
-            mock_loader.load_dataset.assert_called_once_with(dataset_path)
-
-    def test_load_dataset_failure(self) -> None:
-        """測試載入資料集失敗"""
-        manager = DatasetManager()
-
-        with patch('src.services.data_loader.DataLoaderFactory.create_loader') as mock_factory:
-            mock_factory.side_effect = DataLoadError("Failed to load")
-
-            with pytest.raises(DatasetProcessingError):
-                list(manager.load_dataset("invalid_path", "opencoder"))
-
-    def test_process_dataset_basic(self, dataset_manager: DatasetManager) -> None:
-        """測試基本資料集處理"""
-        # 創建一些測試記錄
-        records = [self.create_test_original_record(f"record_{i}") for i in range(2)]
-
-        # 模擬工作流處理
+        manager = DatasetManager(output_dir=temp_dir)
+        
+        assert manager.output_dir == Path(temp_dir)
+        assert manager.enable_checkpointing is True
+        assert manager.recovery_manager is not None
+        assert manager.workflow_manager is not None
+        assert manager.format_converter is not None
+    
+    def test_process_record_success(self, dataset_manager, sample_record):
+        """測試處理單一記錄成功"""
         with patch.object(dataset_manager.workflow_manager, 'process_record') as mock_process:
-            mock_processed_records = [self.create_test_processed_record(f"record_{i}") for i in range(2)]
-            mock_process.side_effect = lambda state, config=None: {
-                **state,
-                'processed_record': mock_processed_records[0],
-                'processing_status': ProcessingStatus.COMPLETED
-            }
-
-            with patch.object(dataset_manager, '_save_final_results'):
-                with patch.object(dataset_manager, '_generate_batch_report'):
-                    processed_records = dataset_manager.process_batch(records)
-
-                    assert len(processed_records) >= 0  # 基本檢查
-                    assert mock_process.call_count >= 0
-
-    def test_process_batch_with_records(self, dataset_manager: DatasetManager) -> None:
-        """測試批次處理"""
-        records = [self.create_test_original_record(f"record_{i}") for i in range(2)]
-
-        # 模擬工作流處理
-        with patch.object(dataset_manager.workflow_manager, 'process_record') as mock_process:
-            # 模擬成功處理
-            def mock_process_side_effect(state, config=None):
-                return {
-                    **state,
-                    'processed_record': self.create_test_processed_record(state['current_record'].id),
-                    'processing_status': ProcessingStatus.COMPLETED
-                }
-            
-            mock_process.side_effect = mock_process_side_effect
-
-            with patch.object(dataset_manager, '_save_final_results'):
-                with patch.object(dataset_manager, '_generate_batch_report'):
-                    processed_records = dataset_manager.process_batch(records)
-
-                    # 基本驗證
-                    assert isinstance(processed_records, list)
-
-    def test_save_results(self, dataset_manager: DatasetManager) -> None:
-        """測試保存結果"""
-        results = [self.create_test_processed_record(f"record_{i}") for i in range(2)]
-
-        # 模擬文件寫入
-        with patch('builtins.open', create=True) as mock_open:
-            with patch('json.dump') as mock_json_dump:
-                # 測試私有方法是否存在
-                if hasattr(dataset_manager, '_save_intermediate_results'):
-                    dataset_manager._save_intermediate_results(results)
-                    
-                # 基本驗證 - 方法應該正常執行
-                assert True
-
-    def test_get_statistics(self, dataset_manager: DatasetManager) -> None:
-        """測試獲取統計資訊"""
-        stats = dataset_manager.get_processing_statistics()
-        
-        # 驗證統計結構
-        assert isinstance(stats, dict)
-        assert 'total_processed' in stats
-        assert 'successful_records' in stats
-        assert 'failed_records' in stats
-
-    def test_clear_statistics(self, dataset_manager: DatasetManager) -> None:
-        """測試清除統計資訊"""
-        # 設置一些統計數據
-        dataset_manager.total_processed = 10
-        dataset_manager.successful_records = 8
-        dataset_manager.failed_records = 2
-
-        # 重新初始化 - 這是實際可用的重置方式
-        new_manager = DatasetManager()
-        assert new_manager.total_processed == 0
-        assert new_manager.successful_records == 0
-        assert new_manager.failed_records == 0
-
-    def test_data_loader_creation(self, dataset_manager: DatasetManager) -> None:
-        """測試資料載入器創建"""
-        with patch('src.services.data_loader.DataLoaderFactory.create_loader') as mock_factory:
-            mock_loader = Mock()
-            mock_factory.return_value = mock_loader
-
-            # 測試透過 load_dataset 創建載入器
-            with patch.object(mock_loader, 'load_dataset', return_value=iter([])):
-                list(dataset_manager.load_dataset("test_path", "opencoder"))
-                
-            mock_factory.assert_called_once_with("opencoder")
-
-    def test_update_statistics(self, dataset_manager: DatasetManager) -> None:
-        """測試更新統計資訊"""
-        results = [self.create_test_processed_record(f"record_{i}") for i in range(2)]
-
-        # 測試統計更新邏輯
-        initial_processed = dataset_manager.total_processed
-        
-        # 模擬處理流程來更新統計
-        with patch.object(dataset_manager.workflow_manager, 'process_record'):
-            with patch.object(dataset_manager, '_save_final_results'):
-                with patch.object(dataset_manager, '_generate_batch_report'):
-                    dataset_manager.process_batch([self.create_test_original_record()])
-
-        # 驗證統計可能被更新（具體邏輯取決於實現）
-        stats = dataset_manager.get_processing_statistics()
-        assert isinstance(stats, dict)
-
-    def test_load_dataset_data_load_error(self, dataset_manager: DatasetManager) -> None:
-        """測試載入資料集時發生 DataLoadError"""
-        from src.services.data_loader import DataLoadError
-        
-        with patch('src.services.data_loader.DataLoaderFactory.create_loader') as mock_factory:
-            mock_loader = Mock()
-            mock_loader.load_dataset.side_effect = DataLoadError("Test data load error")
-            mock_factory.return_value = mock_loader
-
-            # 測試應該拋出 DatasetProcessingError
-            with pytest.raises(DatasetProcessingError, match="Failed to load dataset"):
-                list(dataset_manager.load_dataset("test_path", "opencoder"))
-
-    def test_load_dataset_unexpected_error(self, dataset_manager: DatasetManager) -> None:
-        """測試載入資料集時發生意外錯誤"""
-        with patch('src.services.data_loader.DataLoaderFactory.create_loader') as mock_factory:
-            mock_loader = Mock()
-            mock_loader.load_dataset.side_effect = RuntimeError("Unexpected error")
-            mock_factory.return_value = mock_loader
-
-            # 測試應該拋出 DatasetProcessingError
-            with pytest.raises(DatasetProcessingError, match="Unexpected error"):
-                list(dataset_manager.load_dataset("test_path", "opencoder"))
-
-    def test_process_dataset_with_errors(self, dataset_manager: DatasetManager) -> None:
-        """測試處理包含錯誤的資料集"""
-        # 創建測試記錄
-        records = [self.create_test_original_record(f"record_{i}") for i in range(3)]
-        
-        # 模擬部分記錄處理失敗
-        def mock_process_record(record):
-            if record.id == "record_1":
-                # 返回失敗記錄
-                return ProcessedRecord(
-                    original_record=record,
-                    translation_result=None,
-                    original_qa_result=None,
-                    translated_qa_result=None,
-                    processing_status=ProcessingStatus.FAILED,
-                    final_quality_score=0.0,
-                    processing_time=1.0,
-                    retry_count=0
-                )
-            else:
-                return self.create_test_processed_record(record.id)
-        
-        with patch.object(dataset_manager.workflow_manager, 'process_record', side_effect=mock_process_record):
-            with patch.object(dataset_manager, '_save_final_results'), \
-                 patch.object(dataset_manager, '_generate_batch_report'):
-                
-                result = dataset_manager.process_dataset(iter(records))
-                
-                # 驗證結果
-                assert result is not None
-                assert dataset_manager.total_processed == 3
-                # 檢查統計中有失敗記錄
-                stats = dataset_manager.get_processing_statistics()
-                assert "failed_records" in stats
-
-    def test_save_results_error_handling(self, dataset_manager: DatasetManager) -> None:
-        """測試保存結果錯誤處理"""
-        processed_records = [self.create_test_processed_record("test")]
-        
-        # 模擬保存錯誤
-        with patch('src.utils.format_converter.DatasetExporter') as mock_exporter_class:
-            mock_exporter = Mock()
-            mock_exporter.export_dataset.side_effect = OSError("Permission denied")
-            mock_exporter_class.return_value = mock_exporter
-            
-            with pytest.raises(DatasetProcessingError, match="Failed to save results"):
-                dataset_manager.save_results(processed_records, "output", "test_dataset")
-
-    def test_process_record_exception_handling(self, dataset_manager: DatasetManager) -> None:
-        """測試處理記錄時異常處理 - covers lines 200-204"""
-        record = self.create_test_original_record("test_exception")
-        
-        # 模擬工作流處理拋出異常
-        with patch.object(dataset_manager.workflow_manager, 'process_record') as mock_process:
-            mock_process.side_effect = Exception("Workflow processing failed")
-            
-            # 處理記錄應該返回失敗記錄
-            result = dataset_manager.process_record(record)
-            
-            assert result.processing_status == ProcessingStatus.FAILED
-            assert result.final_quality_score == 0.0
-            assert result.retry_count == 0
-            assert result.original_record == record
-            assert result.translation_result is None
-            assert result.original_qa_result is None
-            assert result.translated_qa_result is None
-            
-            # 檢查統計更新
-            assert dataset_manager.failed_records == 1
-            assert dataset_manager.total_processed == 1
-
-    def test_process_batch_with_critical_error(self, dataset_manager: DatasetManager) -> None:
-        """測試批次處理時發生嚴重錯誤 - covers line 239"""
-        records = [self.create_test_original_record(f"record_{i}") for i in range(3)]
-        
-        # 模擬第二個記錄處理時拋出異常
-        def mock_process_record_side_effect(record):
-            if record.id == "record_1":
-                raise Exception("Critical processing error")
-            return self.create_test_processed_record(record.id)
-        
-        with patch.object(dataset_manager, 'process_record', side_effect=mock_process_record_side_effect):
-            # 批次處理應該繼續處理其他記錄
-            processed_records = dataset_manager.process_batch(records)
-            
-            # 應該只有2個記錄被處理（跳過了出錯的那個）
-            assert len(processed_records) == 2
-            assert all(r.original_record.id != "record_1" for r in processed_records)
-
-    def test_process_dataset_max_records_limit(self, dataset_manager: DatasetManager) -> None:
-        """測試資料集處理最大記錄數限制 - covers lines 251-252"""
-        records = [self.create_test_original_record(f"record_{i}") for i in range(5)]
-
-        def mock_process_record(record):
-            # 模擬真實的 process_record 計數器更新
-            dataset_manager.total_processed += 1
-            dataset_manager.successful_records += 1
-            return self.create_test_processed_record(record.id)
-
-        with patch.object(dataset_manager, 'process_record', side_effect=mock_process_record):
-            with patch.object(dataset_manager, '_save_final_results'), \
-                 patch.object(dataset_manager, '_generate_batch_report') as mock_report:
-                mock_report.return_value = Mock()
-
-                # 限制處理3個記錄
-                result = dataset_manager.process_dataset(iter(records), max_records=3)
-
-                # 應該只處理3個記錄
-                assert dataset_manager.total_processed == 3
-
-    def test_process_dataset_with_progress_save_disabled(self, dataset_manager: DatasetManager) -> None:
-        """測試禁用進度保存時的處理 - covers lines 284-286"""
-        records = [self.create_test_original_record(f"record_{i}") for i in range(4)]  # 4個記錄，批次大小2
-
-        def mock_process_record(record):
-            # 模擬真實的 process_record 計數器更新
-            dataset_manager.total_processed += 1
-            dataset_manager.successful_records += 1
-            return self.create_test_processed_record(record.id)
-
-        with patch.object(dataset_manager, 'process_record', side_effect=mock_process_record):
-            with patch.object(dataset_manager, '_save_final_results'), \
-                 patch.object(dataset_manager, '_generate_batch_report') as mock_report, \
-                 patch('src.core.dataset_manager.FEATURE_FLAGS', {'enable_progress_save': False}), \
-                 patch.object(dataset_manager, '_save_intermediate_results') as mock_save:
-
-                mock_report.return_value = Mock()
-
-                result = dataset_manager.process_dataset(iter(records))
-
-                # _save_intermediate_results 不應該被調用
-                mock_save.assert_not_called()
-
-    def test_process_dataset_with_memory_optimization_disabled(self, dataset_manager: DatasetManager) -> None:
-        """測試禁用記憶體優化時的處理 - covers lines 301-302"""
-        records = [self.create_test_original_record(f"record_{i}") for i in range(3)]
-
-        def mock_process_record(record):
-            # 模擬真實的 process_record 計數器更新
-            dataset_manager.total_processed += 1
-            dataset_manager.successful_records += 1
-            return self.create_test_processed_record(record.id)
-
-        with patch.object(dataset_manager, 'process_record', side_effect=mock_process_record):
-            with patch.object(dataset_manager, '_save_final_results'), \
-                 patch.object(dataset_manager, '_generate_batch_report') as mock_report, \
-                 patch('src.core.dataset_manager.FEATURE_FLAGS', {'enable_memory_optimization': False}), \
-                 patch('gc.collect') as mock_gc:
-
-                mock_report.return_value = Mock()
-
-                result = dataset_manager.process_dataset(iter(records))
-
-                # gc.collect 不應該被調用
-                mock_gc.assert_not_called()
-
-    def test_save_intermediate_results_file_error(self, dataset_manager: DatasetManager) -> None:
-        """測試保存中間結果時文件錯誤 - covers lines 306-323"""
-        processed_records = [self.create_test_processed_record(f"record_{i}") for i in range(2)]
-        
-        # 模擬文件寫入錯誤
-        with patch('builtins.open', side_effect=OSError("Permission denied")):
-            # 方法應該正常執行（只記錄警告）
-            dataset_manager._save_intermediate_results(processed_records)
-            # 不應該拋出異常
-
-    def test_save_final_results_file_error(self, dataset_manager: DatasetManager) -> None:
-        """測試保存最終結果時文件錯誤 - covers lines 327-373"""
-        from src.models.quality import BatchQualityReport
-        
-        processed_records = [self.create_test_processed_record("test")]
-        batch_report = BatchQualityReport(
-            batch_id="test_batch",
-            total_records=1,
-            processed_records=1,
-            passed_records=1,
-            failed_records=0,
-            retry_records=0,
-            average_quality_score=8.0,
-            min_quality_score=8.0,
-            max_quality_score=8.0,
-            total_processing_time=1.0,
-            average_processing_time=1.0,
-            total_retries=0
-        )
-        
-        # 模擬格式轉換器中的文件寫入錯誤
-        with patch.object(dataset_manager.format_converter, 'export_records', side_effect=Exception("Permission denied")):
-            # 現在方法應該拋出 DatasetProcessingError
-            with pytest.raises(DatasetProcessingError, match="Failed to save final results"):
-                dataset_manager._save_final_results(processed_records, batch_report)
-
-    def test_generate_batch_report_with_exception(self, dataset_manager: DatasetManager) -> None:
-        """測試生成批次報告時異常處理 - covers line 430"""
-        processed_records = [self.create_test_processed_record("test")]
-        
-        # 模擬處理時間計算錯誤
-        dataset_manager.processing_start_time = time.time()
-        
-        # 製造一個會導致統計計算失敗的情況
-        bad_record = ProcessedRecord(
-            original_record=self.create_test_original_record("bad"),
-            translation_result=None,
-            original_qa_result=None,
-            translated_qa_result=None,
-            processing_status=ProcessingStatus.FAILED,
-            final_quality_score=None,  # 這可能導致錯誤
-            processing_time=None,      # 這可能導致錯誤
-            retry_count=0
-        )
-        
-        # 破壞記錄以觸發異常
-        with patch('builtins.sum', side_effect=TypeError("unsupported operand type")):
-            result = dataset_manager._generate_batch_report([bad_record])
-            
-            # 應該返回錯誤報告
-            assert result.batch_id == "error_batch"
-            assert result.total_records == 1
-            assert result.passed_records == 0
-            assert result.failed_records == 1
-
-    def test_process_dataset_string_path(self, dataset_manager: DatasetManager) -> None:
-        """測試使用字符串路徑處理資料集"""
-        # 創建測試記錄
-        test_records = [self.create_test_original_record(f"record_{i}") for i in range(2)]
-        
-        with patch.object(dataset_manager, 'load_dataset') as mock_load:
-            mock_load.return_value = iter(test_records)
-            
-            with patch.object(dataset_manager, 'process_record') as mock_process:
-                mock_process.side_effect = lambda record: self.create_test_processed_record(record.id)
-                
-                with patch.object(dataset_manager, '_save_final_results'), \
-                     patch.object(dataset_manager, '_generate_batch_report') as mock_report:
-                    mock_report.return_value = Mock()
-                    
-                    # 使用字符串路徑
-                    result = dataset_manager.process_dataset("test_path.jsonl")
-                    
-                    mock_load.assert_called_once_with("test_path.jsonl", "opencoder")
-
-    def test_process_dataset_iterator_path(self, dataset_manager: DatasetManager) -> None:
-        """測試使用迭代器處理資料集"""
-        # 創建測試記錄
-        test_records = [self.create_test_original_record(f"record_{i}") for i in range(2)]
-
-        def mock_process_record(record):
-            # 模擬真實的 process_record 計數器更新
-            dataset_manager.total_processed += 1
-            dataset_manager.successful_records += 1
-            return self.create_test_processed_record(record.id)
-
-        with patch.object(dataset_manager, 'process_record', side_effect=mock_process_record):
-            with patch.object(dataset_manager, '_save_final_results'), \
-                 patch.object(dataset_manager, '_generate_batch_report') as mock_report:
-                mock_report.return_value = Mock()
-
-                # 使用迭代器
-                result = dataset_manager.process_dataset(iter(test_records))
-
-                assert dataset_manager.total_processed == 2
-
-    def test_save_results_success(self, dataset_manager: DatasetManager) -> None:
-        """測試成功保存結果"""
-        processed_records = [self.create_test_processed_record("test")]
-        
-        with patch('src.utils.format_converter.DatasetExporter') as mock_exporter_class:
-            mock_exporter = Mock()
-            mock_exporter_class.return_value = mock_exporter
-            
-            # 應該成功執行
-            dataset_manager.save_results(processed_records, "output", "test_dataset")
-            
-            mock_exporter.export_dataset.assert_called_once()
-
-    def test_process_record_with_checkpointing_disabled(self, dataset_manager: DatasetManager) -> None:
-        """測試禁用檢查點時處理記錄"""
-        # 創建一個禁用檢查點的管理器
-        manager_no_checkpoint = DatasetManager(enable_checkpointing=False)
-        record = self.create_test_original_record("test_no_checkpoint")
-        
-        with patch.object(manager_no_checkpoint.workflow_manager, 'process_record') as mock_process:
-            mock_process.return_value = {
-                'translation_result': None,
-                'original_qa_result': None, 
-                'translated_qa_result': None,
-                'quality_assessment': None,
+            # Mock 工作流返回成功狀態
+            mock_state = {
                 'processing_status': ProcessingStatus.COMPLETED,
+                'translation_result': None,
+                'original_qa_result': None,
+                'translated_qa_result': None,
+                'quality_assessment': Mock(overall_quality_score=0.8),
                 'retry_count': 0
             }
+            mock_process.return_value = mock_state
             
-            result = manager_no_checkpoint.process_record(record)
+            # 處理記錄
+            processed_record = dataset_manager.process_record(sample_record)
             
-            # 驗證配置為None（無檢查點）
-            mock_process.assert_called_once()
-            call_args = mock_process.call_args
-            assert call_args[1] is None or call_args[1].get('config') is None
-
-    def test_process_dataset_general_exception(self, dataset_manager: DatasetManager) -> None:
-        """測試處理資料集時的一般異常"""
-        records = [self.create_test_original_record("test")]
-
-        def mock_process_record(record):
-            # 模擬真實的 process_record 計數器更新
-            dataset_manager.total_processed += 1
-            dataset_manager.successful_records += 1
-            return self.create_test_processed_record(record.id)
-
-        # 模擬在 _save_final_results 中發生異常，這會觸發 DatasetProcessingError
-        with patch.object(dataset_manager, 'process_record', side_effect=mock_process_record):
-            with patch.object(dataset_manager, '_generate_batch_report') as mock_report, \
-                 patch.object(dataset_manager, '_save_final_results', side_effect=RuntimeError("Save failed")):
+            # 驗證結果
+            assert processed_record.original_record == sample_record
+            assert processed_record.processing_status == ProcessingStatus.COMPLETED
+            assert processed_record.retry_count == 0
+            assert processed_record.processing_time >= 0  # 可能為 0 在快速 mock 情況下
+    
+    def test_process_record_failure(self, dataset_manager, sample_record):
+        """測試處理單一記錄失敗"""
+        with patch.object(dataset_manager.workflow_manager, 'process_record') as mock_process:
+            # Mock 工作流拋出異常
+            mock_process.side_effect = Exception("模擬處理失敗")
+            
+            # 處理記錄
+            processed_record = dataset_manager.process_record(sample_record)
+            
+            # 驗證結果
+            assert processed_record.original_record == sample_record
+            assert processed_record.processing_status == ProcessingStatus.FAILED
+            assert processed_record.final_quality_score == 0.0
+    
+    def test_immediate_save(self, dataset_manager, sample_record):
+        """測試即時保存功能"""
+        with patch.object(dataset_manager.workflow_manager, 'process_record') as mock_process:
+            mock_state = {
+                'processing_status': ProcessingStatus.COMPLETED,
+                'translation_result': None,
+                'original_qa_result': None,
+                'translated_qa_result': None,
+                'quality_assessment': None,
+                'retry_count': 0
+            }
+            mock_process.return_value = mock_state
+            
+            # 處理並保存記錄
+            processed_record = dataset_manager.process_record(sample_record)
+            success = dataset_manager.recovery_manager.save_record(processed_record)
+            
+            assert success is True
+            
+            # 驗證文件存在
+            results_file = dataset_manager.output_dir / "processed_records.jsonl"
+            assert results_file.exists()
+    
+    def test_recovery_functionality(self, dataset_manager):
+        """測試恢復功能"""
+        test_ids = ["test_001", "test_002", "test_003"]
+        
+        # 模擬已處理的記錄（只有部分成功）
+        with patch.object(dataset_manager.recovery_manager, 'get_processed_status') as mock_status:
+            mock_status.return_value = {
+                "successful": {"test_001"},
+                "failed": {"test_002"},
+                "total": 2
+            }
+            
+            # 檢查缺失和失敗記錄
+            status = dataset_manager.recovery_manager.find_missing_and_failed(test_ids)
+            
+            assert "test_003" in status["missing"]  # 未處理
+            assert "test_002" in status["failed"]   # 處理失敗
+            assert "test_001" not in status["missing"] and "test_001" not in status["failed"]  # 成功
+    
+    def test_run_with_auto_resume(self, dataset_manager):
+        """測試運行功能"""
+        # 創建測試記錄
+        test_records = [
+            OriginalRecord(
+                id=f"test_{i:03d}",
+                question=f"Question {i}",
+                answer=f"Answer {i}",
+                source_dataset="test",
+                metadata={},
+                complexity_level=ComplexityLevel.SIMPLE
+            )
+            for i in range(1, 3)  # 減少記錄數
+        ]
+        
+        with patch.object(dataset_manager, 'load_dataset') as mock_load:
+            mock_load.return_value = test_records
+            
+            with patch.object(dataset_manager, 'process_record') as mock_process:
+                mock_record = Mock(spec=ProcessedRecord)
+                mock_record.processing_status = ProcessingStatus.COMPLETED
+                mock_process.return_value = mock_record
                 
-                mock_report.return_value = Mock()
+                with patch.object(dataset_manager.recovery_manager, 'save_record') as mock_save:
+                    mock_save.return_value = True
+                    
+                    with patch.object(dataset_manager, '_create_batch_report') as mock_report:
+                        mock_batch_report = Mock(spec=BatchQualityReport)
+                        mock_report.return_value = mock_batch_report
+                        
+                        with patch.object(dataset_manager, '_save_final_results'):
+                            # 測試運行
+                            result = dataset_manager.run("test_path", "opencoder", max_records=2)
+                            
+                            assert result == mock_batch_report
+                            assert mock_load.called
+                            assert mock_process.call_count == 2
+    
+    def test_load_dataset_success(self, dataset_manager):
+        """測試載入資料集成功"""
+        test_records = [
+            OriginalRecord(
+                id="test_load",
+                question="Test question",
+                answer="Test answer",
+                source_dataset="test",
+                metadata={},
+                complexity_level=ComplexityLevel.SIMPLE
+            )
+        ]
+        
+        with patch('src.core.dataset_manager.DataLoaderFactory.create_loader') as mock_factory:
+            mock_loader = Mock()
+            mock_loader.load_dataset.return_value = test_records
+            mock_factory.return_value = mock_loader
+            
+            result = dataset_manager.load_dataset("test_path", "opencoder")
+            
+            assert len(result) == 1
+            assert result[0].id == "test_load"
+    
+    def test_resume_functionality(self, dataset_manager):
+        """測試恢復功能"""
+        # 創建測試記錄
+        test_records = [
+            OriginalRecord(
+                id=f"resume_test_{i}",
+                question=f"Question {i}",
+                answer=f"Answer {i}",
+                source_dataset="test",
+                metadata={},
+                complexity_level=ComplexityLevel.SIMPLE
+            )
+            for i in range(1, 4)
+        ]
+        
+        with patch.object(dataset_manager, 'load_dataset') as mock_load:
+            mock_load.return_value = test_records
+            
+            with patch.object(dataset_manager.recovery_manager, 'find_missing_and_failed') as mock_find:
+                mock_find.return_value = {
+                    "missing": {"resume_test_3"},
+                    "failed": {"resume_test_2"},
+                    "need_processing": {"resume_test_2", "resume_test_3"}
+                }
                 
-                with pytest.raises(DatasetProcessingError):
-                    dataset_manager.process_dataset(iter(records))
+                with patch.object(dataset_manager.recovery_manager, 'print_status'):
+                    with patch.object(dataset_manager, 'process_record') as mock_process:
+                        mock_record = Mock(spec=ProcessedRecord)
+                        mock_process.return_value = mock_record
+                        
+                        with patch.object(dataset_manager.recovery_manager, 'save_record') as mock_save:
+                            mock_save.return_value = True
+                            
+                            with patch.object(dataset_manager.recovery_manager, 'load_successful_records') as mock_load_success:
+                                mock_load_success.return_value = []
+                                
+                                with patch.object(dataset_manager, '_create_batch_report_from_records') as mock_report:
+                                    mock_batch_report = Mock(spec=BatchQualityReport)
+                                    mock_report.return_value = mock_batch_report
+                                    
+                                    with patch.object(dataset_manager, '_save_final_results'):
+                                        # 測試恢復
+                                        result = dataset_manager.resume("test_path")
+                                        
+                                        assert result == mock_batch_report
+
+
+class TestDatasetManagerIntegration:
+    """整合測試"""
+    
+    def test_full_workflow_simulation(self):
+        """模擬完整工作流程"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = DatasetManager(output_dir=temp_dir)
+            
+            # 創建測試記錄
+            test_records = [
+                OriginalRecord(
+                    id=f"integration_test_{i}",
+                    question=f"Integration question {i}",
+                    answer=f"Integration answer {i}",
+                    source_dataset="integration_test",
+                    metadata={},
+                    complexity_level=ComplexityLevel.SIMPLE
+                )
+                for i in range(1, 3)  # 只用少量記錄進行測試
+            ]
+            
+            with patch.object(manager, 'load_dataset') as mock_load:
+                mock_load.return_value = test_records
+                
+                with patch.object(manager.workflow_manager, 'process_record') as mock_process:
+                    # Mock 成功處理
+                    mock_state = {
+                        'processing_status': ProcessingStatus.COMPLETED,
+                        'translation_result': None,
+                        'original_qa_result': None,
+                        'translated_qa_result': None,
+                        'quality_assessment': Mock(overall_quality_score=0.8),
+                        'retry_count': 0
+                    }
+                    mock_process.return_value = mock_state
+                    
+                    with patch.object(manager.recovery_manager, 'save_record') as mock_save:
+                        mock_save.return_value = True
+                        
+                        with patch.object(manager, '_create_batch_report') as mock_report:
+                            mock_batch_report = Mock(spec=BatchQualityReport)
+                            mock_batch_report.total_records = 2
+                            mock_report.return_value = mock_batch_report
+                            
+                            with patch.object(manager, '_save_final_results'):
+                                # 執行處理
+                                result = manager.run("test_path", max_records=2)
+                                
+                                # 驗證結果
+                                assert isinstance(result, BatchQualityReport)
+                                assert result.total_records == 2

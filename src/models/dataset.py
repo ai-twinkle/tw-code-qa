@@ -133,7 +133,6 @@ class QAExecutionResult:
 
 
 @dataclass
-@dataclass
 class ProcessedRecord:
     """處理完成的記錄"""
     original_record: OriginalRecord

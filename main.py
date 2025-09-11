@@ -15,7 +15,6 @@ from dotenv import load_dotenv
 from src.config.logging_config import setup_logging
 from src.config.settings import set_environment
 from src.core.dataset_manager import DatasetManager
-from src.utils.format_converter import DatasetExporter
 
 
 def setup_argument_parser() -> argparse.ArgumentParser:
@@ -26,16 +25,16 @@ def setup_argument_parser() -> argparse.ArgumentParser:
         epilog="""
 範例用法:
   # 處理 OpenCoder 教育指導資料集
-  python main.py --dataset-path data/opencoder_dataset_educational_instruct --dataset-type opencoder
+  uv run python main.py --dataset-path data/opencoder_dataset_educational_instruct --dataset-type opencoder --output-dir output/educational_instruct
   
-  # 指定輸出目錄和批次大小
-  python main.py --dataset-path data/opencoder_dataset_evol_instruct --output-dir output/evol --batch-size 50
-  
+  # 處理 Evol Instruct 資料集
+  uv run python main.py --dataset-path data/opencoder_dataset_evol_instruct --dataset-type opencoder --output-dir output/evol_instruct
+
   # 測試模式 (只處理前 10 筆記錄)
-  python main.py --dataset-path data/sample --max-records 10 --environment development
-  
-  # 生產模式
-  python main.py --dataset-path data/opencoder_dataset_package_instruct --environment production --batch-size 200
+  uv run python main.py --dataset-path data/opencoder_dataset_educational_instruct --output-dir output/test_run --max-records 10 --environment development
+
+  # 恢復處理（從中斷處繼續）
+  uv run python main.py --dataset-path data/opencoder_dataset_package_instruct --output-dir output/package_instruct --resume
         """
     )
     
@@ -64,13 +63,6 @@ def setup_argument_parser() -> argparse.ArgumentParser:
     )
     
     parser.add_argument(
-        '--batch-size',
-        type=int,
-        default=100,
-        help='批次大小 (預設: 100)'
-    )
-    
-    parser.add_argument(
         '--max-records',
         type=int,
         help='最大處理記錄數 (用於測試，預設: 全部)'
@@ -90,6 +82,12 @@ def setup_argument_parser() -> argparse.ArgumentParser:
         default=['jsonl', 'csv'],
         choices=['jsonl', 'csv', 'arrow'],
         help='匯出格式 (預設: jsonl csv)'
+    )
+    
+    parser.add_argument(
+        '--resume',
+        action='store_true',
+        help='恢復處理（檢查已處理記錄，重跑失敗和缺失的）'
     )
     
     parser.add_argument(
@@ -122,10 +120,6 @@ def validate_arguments(args: argparse.Namespace) -> None:
     if not dataset_path.exists():
         raise ValueError(f"Dataset path does not exist: {args.dataset_path}")
     
-    # 檢查批次大小
-    if args.batch_size <= 0:
-        raise ValueError(f"Batch size must be positive: {args.batch_size}")
-    
     # 檢查最大記錄數
     if args.max_records is not None and args.max_records <= 0:
         raise ValueError(f"Max records must be positive: {args.max_records}")
@@ -140,12 +134,15 @@ def print_system_info(args: argparse.Namespace) -> None:
     print(f"資料集路徑: {args.dataset_path}")
     print(f"資料集類型: {args.dataset_type}")
     print(f"輸出目錄: {args.output_dir}")
-    print(f"批次大小: {args.batch_size}")
     print(f"執行環境: {args.environment}")
     print(f"匯出格式: {', '.join(args.export_formats)}")
     if args.max_records:
         print(f"最大記錄數: {args.max_records}")
     print(f"檢查點: {'停用' if args.disable_checkpointing else '啟用'}")
+    if args.resume:
+        print("模式: 恢復處理（重跑失敗和缺失記錄）")
+    else:
+        print("模式: 全新處理（逐筆處理並立即保存）")
     print("-" * 80)
 
 
@@ -157,23 +154,30 @@ def run_dataset_conversion(args: argparse.Namespace) -> None:
         # 創建資料集管理器
         dataset_manager = DatasetManager(
             output_dir=args.output_dir,
-            batch_size=args.batch_size,
             enable_checkpointing=not args.disable_checkpointing
         )
         
         logger.info("開始資料集處理...")
         
-        # 執行資料集處理
-        batch_report = dataset_manager.process_dataset(
-            dataset_path=args.dataset_path,
-            dataset_type=args.dataset_type,
-            max_records=args.max_records
-        )
+        # 根據參數選擇處理模式
+        if args.resume:
+            logger.info("恢復處理模式...")
+            batch_report = dataset_manager.resume(
+                dataset_path=args.dataset_path,
+                dataset_type=args.dataset_type,
+                max_records=args.max_records
+            )
+        else:
+            logger.info("全新處理模式...")
+            batch_report = dataset_manager.run(
+                dataset_path=args.dataset_path,
+                dataset_type=args.dataset_type,
+                max_records=args.max_records
+            )
         
-        logger.info("資料集處理完成，開始匯出結果...")
+        logger.info("資料集處理完成！")
         
-        # 匯出處理後的資料 (這裡需要從資料集管理器取得記錄)
-        # 由於當前實作中沒有直接返回記錄列表，我們先記錄完成狀態
+        # 顯示處理結果摘要
         print("\n" + "=" * 80)
         print("處理結果摘要")
         print("=" * 80)
@@ -186,12 +190,19 @@ def run_dataset_conversion(args: argparse.Namespace) -> None:
         print(f"處理時間: {batch_report.total_processing_time:.2f} 秒")
         print(f"平均處理時間: {batch_report.average_processing_time:.2f} 秒/記錄")
         
-        # 匯出品質報告
-        exporter = DatasetExporter()
-        report_path = Path(args.output_dir) / "quality_report.json"
-        exporter.converter.export_quality_report(batch_report, report_path)
+        # 顯示當前狀態
+        print("\n" + "-" * 40)
+        print("最終狀態報告")
+        print("-" * 40)
+        # 打印恢復狀態
+        recovery_status = dataset_manager.recovery_manager.get_processed_status()
+        print(f"已處理成功記錄: {len(recovery_status['successful'])}")
+        print(f"處理失敗記錄: {len(recovery_status['failed'])}")
+        print(f"總計處理記錄: {recovery_status['total']}")
         
-        print(f"\n品質報告已匯出到: {report_path}")
+        # 結果文件位置
+        print(f"\n處理記錄已保存到: {Path(args.output_dir) / 'processed_records.jsonl'}")
+        print(f"品質報告已保存到: {Path(args.output_dir) / 'quality_report.json'}")
         print("=" * 80)
         
         logger.info("資料集轉換完成!")

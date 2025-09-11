@@ -4,7 +4,9 @@ Utils package initialization
 """
 
 from .format_converter import DataFormatConverter
+from .recovery import RecoveryManager
 
 __all__ = [
     "DataFormatConverter",
+    "RecoveryManager",
 ]
